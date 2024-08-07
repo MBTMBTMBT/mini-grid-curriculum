@@ -312,6 +312,7 @@ class CurriculumRunner:
         # start training
         for i in range(len(train_env_list)):
             print(f"Training stage [{i+1} / {len(train_env_list)}]:")
+            print(f"Time step starts from: {start_time_step}...")
             # make call back function for testing.
             target_callback = EvalCallback(
                 eval_envs=target_env_list,
@@ -345,7 +346,7 @@ class CurriculumRunner:
             best_path = os.path.join(model_save_dir, f"task_{i}_best.zip")
             if os.path.exists(best_path):
                 model = PPO.load(best_path, env=env)
-                print("Loaded model from saved path.")
+                print(f"Loaded model from {best_path}.")
             else:
                 model = PPO("MlpPolicy", env, verbose=1)
                 print("Initialized new model.")
@@ -373,7 +374,7 @@ if __name__ == '__main__':
     config.train_random_rotate = True
     config.train_random_flip = True
     config.train_max_steps = 500
-    config.train_total_steps = 1e5
+    config.train_total_steps = 1e4
     config.eval_display_mode = "middle"
     config.eval_random_rotate = False
     config.eval_random_flip = False
@@ -390,7 +391,7 @@ if __name__ == '__main__':
     config.train_random_rotate = True
     config.train_random_flip = True
     config.train_max_steps = 500
-    config.train_total_steps = 1e5
+    config.train_total_steps = 1e4
     config.eval_display_mode = "middle"
     config.eval_random_rotate = False
     config.eval_random_flip = False
@@ -407,7 +408,7 @@ if __name__ == '__main__':
     config.train_random_rotate = True
     config.train_random_flip = True
     config.train_max_steps = 1000
-    config.train_total_steps = 2e5
+    config.train_total_steps = 2e4
     config.eval_display_mode = "middle"
     config.eval_random_rotate = False
     config.eval_random_flip = False
@@ -424,7 +425,7 @@ if __name__ == '__main__':
     config.train_random_rotate = True
     config.train_random_flip = True
     config.train_max_steps = 1000
-    config.train_total_steps = 2e5
+    config.train_total_steps = 2e4
     config.eval_display_mode = "middle"
     config.eval_random_rotate = False
     config.eval_random_flip = False
@@ -441,7 +442,7 @@ if __name__ == '__main__':
     config.train_random_rotate = True
     config.train_random_flip = True
     config.train_max_steps = 2000
-    config.train_total_steps = 5e5
+    config.train_total_steps = 5e4
     config.eval_display_mode = "middle"
     config.eval_random_rotate = False
     config.eval_random_flip = False

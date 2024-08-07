@@ -374,7 +374,7 @@ if __name__ == '__main__':
     config.train_random_rotate = True
     config.train_random_flip = True
     config.train_max_steps = 500
-    config.train_total_steps = 5e4
+    config.train_total_steps = 2e5
     config.eval_display_mode = "middle"
     config.eval_random_rotate = False
     config.eval_random_flip = False
@@ -391,7 +391,7 @@ if __name__ == '__main__':
     config.train_random_rotate = True
     config.train_random_flip = True
     config.train_max_steps = 500
-    config.train_total_steps = 5e4
+    config.train_total_steps = 2e5
     config.eval_display_mode = "middle"
     config.eval_random_rotate = False
     config.eval_random_flip = False
@@ -408,7 +408,7 @@ if __name__ == '__main__':
     config.train_random_rotate = True
     config.train_random_flip = True
     config.train_max_steps = 1000
-    config.train_total_steps = 1e5
+    config.train_total_steps = 2e5
     config.eval_display_mode = "middle"
     config.eval_random_rotate = False
     config.eval_random_flip = False

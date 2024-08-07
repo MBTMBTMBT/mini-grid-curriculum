@@ -63,6 +63,7 @@ def eval_envs(
         num_timesteps: int,
         verbose: int = 1,
 ) -> float:
+    print("Time step: ", num_timesteps)
     rewards = []
     for env, env_name in zip(envs, env_names):
         episode_rewards, _ = evaluate_policy(
@@ -356,7 +357,7 @@ class CurriculumRunner:
             model.learn(total_timesteps=train_env_step_list[i], callback=callback_list, progress_bar=True)
 
             # accumulated timestep
-            start_time_step = eval_callback.num_timesteps
+            start_time_step += eval_callback.num_timesteps
 
         # close the writer
         log_writer.close()
@@ -374,7 +375,7 @@ if __name__ == '__main__':
     config.train_random_rotate = True
     config.train_random_flip = True
     config.train_max_steps = 500
-    config.train_total_steps = 2e5
+    config.train_total_steps = 1e5
     config.eval_display_mode = "middle"
     config.eval_random_rotate = False
     config.eval_random_flip = False
@@ -391,7 +392,7 @@ if __name__ == '__main__':
     config.train_random_rotate = True
     config.train_random_flip = True
     config.train_max_steps = 500
-    config.train_total_steps = 2e5
+    config.train_total_steps = 1e5
     config.eval_display_mode = "middle"
     config.eval_random_rotate = False
     config.eval_random_flip = False
@@ -408,7 +409,7 @@ if __name__ == '__main__':
     config.train_random_rotate = True
     config.train_random_flip = True
     config.train_max_steps = 1000
-    config.train_total_steps = 2e5
+    config.train_total_steps = 1e5
     config.eval_display_mode = "middle"
     config.eval_random_rotate = False
     config.eval_random_flip = False
@@ -425,7 +426,7 @@ if __name__ == '__main__':
     config.train_random_rotate = True
     config.train_random_flip = True
     config.train_max_steps = 1000
-    config.train_total_steps = 2e5
+    config.train_total_steps = 1e5
     config.eval_display_mode = "middle"
     config.eval_random_rotate = False
     config.eval_random_flip = False
@@ -442,7 +443,7 @@ if __name__ == '__main__':
     config.train_random_rotate = True
     config.train_random_flip = True
     config.train_max_steps = 2000
-    config.train_total_steps = 5e5
+    config.train_total_steps = 1e5
     config.eval_display_mode = "middle"
     config.eval_random_rotate = False
     config.eval_random_flip = False

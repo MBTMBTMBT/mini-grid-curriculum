@@ -1,1 +1,238 @@
-pass
+import os
+import numpy as np
+from typing import Dict, List, Union
+
+from gymnasium import Env
+from stable_baselines3.common.type_aliases import PolicyPredictor
+from torch.utils.tensorboard import SummaryWriter
+from customize_minigrid.custom_env import CustomEnv
+from stable_baselines3.common.vec_env import DummyVecEnv, VecMonitor, VecEnv
+from stable_baselines3.common.callbacks import EventCallback
+from stable_baselines3.common.evaluation import evaluate_policy
+import gymnasium as gym
+
+
+class TaskConfig:
+    def __init__(self):
+        self.name = ""
+
+        self.txt_file_path: str = ""
+        self.custom_mission: str = ""
+
+        self.minimum_display_size: int = 0
+
+        self.train_display_mode: str = "random"
+        self.train_random_rotate: bool = True
+        self.train_random_flip: bool = True
+        self.train_max_steps: int = 0
+        self.train_total_steps: int = 0
+
+        self.eval_display_mode: str = "middle"
+        self.eval_random_rotate: bool = False
+        self.eval_random_flip: bool = False
+        self.eval_max_steps: int = 0
+
+        self.difficulty_level: int = 0
+
+
+class TargetConfig:
+    def __init__(self):
+        self.name = ""
+
+        self.txt_file_path: str = ""
+        self.custom_mission: str = ""
+
+        self.minimum_display_size: int = 0
+
+        self.display_mode: str = "middle"
+        self.random_rotate: bool = False
+        self.random_flip: bool = False
+        self.max_steps: int = 0
+        self.eval_episodes: int = 0
+
+
+def eval_envs(
+        envs: List[VecEnv],
+        env_names: List[str],
+        model: PolicyPredictor,
+        num_eval_episodes: int,
+        deterministic: bool,
+        log_writer: SummaryWriter,
+        num_timesteps: int,
+        verbose: int = 1,
+) -> float:
+    rewards = []
+    for env, env_name in zip(envs, env_names):
+        episode_rewards, _ = evaluate_policy(
+            model,
+            env,
+            n_eval_episodes=num_eval_episodes,
+            deterministic=deterministic,
+            return_episode_rewards=True,
+        )
+
+        mean_reward = np.mean(episode_rewards)
+        std_reward = np.std(episode_rewards)
+
+        # Log results
+        if verbose >= 1:
+            print(f"Evaluation of {env_name}: Mean reward: {mean_reward:.2f} +/- {std_reward:.2f}")
+
+        # Log results to TensorBoard
+        log_writer.add_scalar(f'{env_name}/mean_reward', mean_reward, num_timesteps)
+        log_writer.add_scalar(f'{env_name}/std_reward', std_reward, num_timesteps)
+
+        rewards.append(mean_reward)
+
+    return np.mean(rewards)
+
+
+class EvalSaveCallback(EventCallback):
+    def __init__(
+            self,
+            eval_envs: List[VecEnv],
+            eval_env_names: List[str],
+            model_save_dir: str,
+            model_save_name: str,
+            log_writer: SummaryWriter,
+            eval_freq: int,
+            n_eval_episodes: int,
+            deterministic: bool = True,
+            verbose: int = 1,
+    ):
+        super().__init__(verbose=verbose)
+        self.eval_envs = eval_envs
+        self.eval_env_names = eval_env_names
+        self.eval_freq = eval_freq
+        self.n_eval_episodes = n_eval_episodes
+        self.deterministic = deterministic
+        self.best_mean_reward = -np.inf
+        self.model_save_dir = model_save_dir
+        self.model_save_name = model_save_name
+        self.log_writer = log_writer
+        self.evaluations: List[float] = []
+
+    def _on_step(self) -> bool:
+        # Evaluate the model at specified frequency
+        if self.n_calls % self.eval_freq == 0:
+            print("Evaluating model...")
+            mean_reward = eval_envs(
+                envs=self.eval_envs,
+                env_names=self.eval_env_names,
+                model=self.model,
+                num_eval_episodes=self.n_eval_episodes,
+                deterministic=self.deterministic,
+                log_writer=self.log_writer,
+                num_timesteps=self.num_timesteps,
+                verbose=self.verbose,
+            )
+
+            latest_path = os.path.join(self.model_save_dir, f"{self.model_save_name}_latest.zip")
+            self.model.save(latest_path)
+            if self.verbose >= 1:
+                print(f"Saved latest model to {latest_path}")
+
+            best_path = os.path.join(self.model_save_dir, f"{self.model_save_name}_best.zip")
+            if mean_reward > self.best_mean_reward:
+                self.best_mean_reward = mean_reward
+                self.model.save(best_path)
+                if self.verbose >= 1:
+                    print(f"New best model with mean reward {mean_reward:.2f} saved to {best_path}")
+
+        return True
+
+
+class CurriculumRunner:
+    def __init__(
+            self,
+            task_configs: List[TaskConfig],
+            target_configs: List[TargetConfig],
+    ):
+        self.task_dict: Dict[int, List[TaskConfig]] = dict()
+        self.target_configs = target_configs
+        self.max_minimum_display_size: int = 0
+
+        # add tasks, find the minimum display size for all
+        for each_task_config in task_configs:
+            if each_task_config.minimum_display_size > self.max_minimum_display_size:
+                self.max_minimum_display_size = each_task_config.minimum_display_size
+            self.task_dict.setdefault(each_task_config.difficulty_level, []).append(each_task_config)
+        for each_target_config in target_configs:
+            if each_target_config.minimum_display_size > self.max_minimum_display_size:
+                self.max_minimum_display_size = each_target_config.minimum_display_size
+
+    def train(
+            self,
+            session_dir: str,
+            force_sequential: bool = False,
+    ):
+        """
+        Trainer function for mini-grid curriculum
+        Args:
+            session_dir: directory to save the trained model and logs
+            force_sequential: if True, make all tasks sequentially even with same difficulty level
+
+        Returns:
+
+        """
+        # prepare environments
+        train_env_list = []
+        train_env_step_list = []
+        train_env_name_list = []
+        eval_env_list = []
+        eval_env_name_list = []
+
+        # iterate through task dict to make sequence of environments.
+        for difficulty_level in sorted(self.task_dict.keys()):
+            tasks = self.task_dict[difficulty_level]
+            train_envs = []
+            train_env_steps = []
+            train_env_names = []
+            for each_task_config in tasks:
+                train_env = CustomEnv(
+                    txt_file_path=each_task_config.txt_file_path,
+                    display_size=self.max_minimum_display_size,
+                    display_mode=each_task_config.train_display_mode,
+                    random_rotate=each_task_config.train_random_rotate,
+                    random_flip=each_task_config.train_random_flip,
+                    custom_mission=each_task_config.custom_mission,
+                    max_steps=each_task_config.train_max_steps,
+                )
+                eval_env = CustomEnv(
+                    txt_file_path=each_task_config.txt_file_path,
+                    display_size=self.max_minimum_display_size,
+                    display_mode=each_task_config.eval_display_mode,
+                    random_rotate=each_task_config.eval_random_rotate,
+                    random_flip=each_task_config.eval_random_flip,
+                    custom_mission=each_task_config.custom_mission,
+                    max_steps=each_task_config.eval_max_steps,
+                )
+                train_envs.append(train_env)
+                train_env_steps.append(each_task_config.train_total_steps)
+                train_env_names.append(each_task_config.name)
+                eval_env_list.append(VecMonitor(DummyVecEnv([lambda: eval_env])))
+                eval_env_name_list.append(each_task_config.name)
+            if force_sequential:
+                for env in train_envs:
+                    train_env_list.append(VecMonitor(DummyVecEnv([lambda: env])))
+                for steps in train_env_steps:
+                    train_env_step_list.append(steps)
+                for name in train_env_names:
+                    train_env_name_list.append(name)
+            else:
+                train_env_list.append(VecMonitor(DummyVecEnv([lambda: env for env in train_envs])))
+                train_env_step_list.append(sum(train_env_steps))
+                train_env_name_list.append(train_env_names)
+
+        # prepare workspace and log writer
+        os.makedirs(session_dir, exist_ok=True)
+        log_dir = os.path.join(session_dir, "logs")
+        os.makedirs(log_dir, exist_ok=True)
+        model_save_path = os.path.join(session_dir, "saved_models")
+        os.makedirs(model_save_path, exist_ok=True)
+        log_writer = SummaryWriter(log_dir)
+
+        # start training
+
+        # close the writer
+        log_writer.close()

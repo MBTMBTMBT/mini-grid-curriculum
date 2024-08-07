@@ -12,6 +12,8 @@ from stable_baselines3.common.callbacks import EventCallback, CallbackList
 from stable_baselines3.common.evaluation import evaluate_policy
 import gymnasium as gym
 
+from customize_minigrid.wrappers import FullyObsSB3MLPWrapper
+
 
 class TaskConfig:
     def __init__(self):
@@ -248,23 +250,27 @@ class CurriculumRunner:
             train_env_steps = []
             train_env_names = []
             for each_task_config in tasks:
-                train_env = CustomEnv(
-                    txt_file_path=each_task_config.txt_file_path,
-                    display_size=self.max_minimum_display_size,
-                    display_mode=each_task_config.train_display_mode,
-                    random_rotate=each_task_config.train_random_rotate,
-                    random_flip=each_task_config.train_random_flip,
-                    custom_mission=each_task_config.custom_mission,
-                    max_steps=each_task_config.train_max_steps,
+                train_env = FullyObsSB3MLPWrapper(
+                    CustomEnv(
+                        txt_file_path=each_task_config.txt_file_path,
+                        display_size=self.max_minimum_display_size,
+                        display_mode=each_task_config.train_display_mode,
+                        random_rotate=each_task_config.train_random_rotate,
+                        random_flip=each_task_config.train_random_flip,
+                        custom_mission=each_task_config.custom_mission,
+                        max_steps=each_task_config.train_max_steps,
+                    )
                 )
-                eval_env = CustomEnv(
-                    txt_file_path=each_task_config.txt_file_path,
-                    display_size=self.max_minimum_display_size,
-                    display_mode=each_task_config.eval_display_mode,
-                    random_rotate=each_task_config.eval_random_rotate,
-                    random_flip=each_task_config.eval_random_flip,
-                    custom_mission=each_task_config.custom_mission,
-                    max_steps=each_task_config.eval_max_steps,
+                eval_env = FullyObsSB3MLPWrapper(
+                    CustomEnv(
+                        txt_file_path=each_task_config.txt_file_path,
+                        display_size=self.max_minimum_display_size,
+                        display_mode=each_task_config.eval_display_mode,
+                        random_rotate=each_task_config.eval_random_rotate,
+                        random_flip=each_task_config.eval_random_flip,
+                        custom_mission=each_task_config.custom_mission,
+                        max_steps=each_task_config.eval_max_steps,
+                    )
                 )
                 train_envs.append(train_env)
                 train_env_steps.append(each_task_config.train_total_steps)
@@ -353,3 +359,104 @@ class CurriculumRunner:
 
         # close the writer
         log_writer.close()
+
+
+if __name__ == '__main__':
+    task_configs = []
+
+    config = TaskConfig()
+    config.name = "short_corridor"
+    config.txt_file_path = r"./maps/short_corridor.txt"
+    config.custom_mission = "reach the goal"
+    config.minimum_display_size = 6
+    config.train_display_mode = "random"
+    config.train_random_rotate = True
+    config.train_random_flip = True
+    config.train_max_steps = 500
+    config.train_total_steps = 1e5
+    config.eval_display_mode = "middle"
+    config.eval_random_rotate = False
+    config.eval_random_flip = False
+    config.eval_max_steps = 250
+    config.difficulty_level = 0
+    task_configs.append(config)
+
+    config = TaskConfig()
+    config.name = "long_corridor"
+    config.txt_file_path = r"./maps/long_corridor.txt"
+    config.custom_mission = "reach the goal"
+    config.minimum_display_size = 9
+    config.train_display_mode = "random"
+    config.train_random_rotate = True
+    config.train_random_flip = True
+    config.train_max_steps = 500
+    config.train_total_steps = 1e5
+    config.eval_display_mode = "middle"
+    config.eval_random_rotate = False
+    config.eval_random_flip = False
+    config.eval_max_steps = 250
+    config.difficulty_level = 1
+    task_configs.append(config)
+
+    config = TaskConfig()
+    config.name = "square_space"
+    config.txt_file_path = r"./maps/square_space.txt"
+    config.custom_mission = "reach the goal"
+    config.minimum_display_size = 7
+    config.train_display_mode = "random"
+    config.train_random_rotate = True
+    config.train_random_flip = True
+    config.train_max_steps = 1000
+    config.train_total_steps = 2e5
+    config.eval_display_mode = "middle"
+    config.eval_random_rotate = False
+    config.eval_random_flip = False
+    config.eval_max_steps = 500
+    config.difficulty_level = 2
+    task_configs.append(config)
+
+    config = TaskConfig()
+    config.name = "small_maze"
+    config.txt_file_path = r"./maps/small_maze.txt"
+    config.custom_mission = "reach the goal"
+    config.minimum_display_size = 7
+    config.train_display_mode = "random"
+    config.train_random_rotate = True
+    config.train_random_flip = True
+    config.train_max_steps = 1000
+    config.train_total_steps = 2e5
+    config.eval_display_mode = "middle"
+    config.eval_random_rotate = False
+    config.eval_random_flip = False
+    config.eval_max_steps = 500
+    config.difficulty_level = 3
+    task_configs.append(config)
+
+    config = TaskConfig()
+    config.name = "big_maze"
+    config.txt_file_path = r"./maps/big_maze.txt"
+    config.custom_mission = "reach the goal"
+    config.minimum_display_size = 13
+    config.train_display_mode = "random"
+    config.train_random_rotate = True
+    config.train_random_flip = True
+    config.train_max_steps = 5000
+    config.train_total_steps = 5e5
+    config.eval_display_mode = "middle"
+    config.eval_random_rotate = False
+    config.eval_random_flip = False
+    config.eval_max_steps = 2500
+    config.difficulty_level = 4
+    task_configs.append(config)
+
+    target_configs = []
+
+    runner = CurriculumRunner(task_configs, target_configs)
+    runner.train(
+        session_dir="./experiments/curriculum_example",
+        eval_freq=int(5e3),
+        num_eval_episodes=20,
+        eval_deterministic=False,
+        force_sequential=True,
+        start_time_step=0,
+    )

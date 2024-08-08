@@ -1,3 +1,6 @@
 [submodule "customize_minigrid"]
 	path = customize_minigrid
 	url = https://github.com/MBTMBTMBT/customize-mini-grid.git
+[submodule "mdp_graph"]
+	path = mdp_graph
+	url = https://github.com/MBTMBTMBT/mdp_graph.git

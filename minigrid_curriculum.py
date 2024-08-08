@@ -379,7 +379,7 @@ if __name__ == '__main__':
     config.eval_display_mode = "middle"
     config.eval_random_rotate = False
     config.eval_random_flip = False
-    config.eval_max_steps = 10
+    config.eval_max_steps = 50
     config.difficulty_level = 0
     task_configs.append(config)
 
@@ -396,7 +396,7 @@ if __name__ == '__main__':
     config.eval_display_mode = "middle"
     config.eval_random_rotate = False
     config.eval_random_flip = False
-    config.eval_max_steps = 10
+    config.eval_max_steps = 50
     config.difficulty_level = 1
     task_configs.append(config)
 
@@ -413,7 +413,7 @@ if __name__ == '__main__':
     config.eval_display_mode = "middle"
     config.eval_random_rotate = False
     config.eval_random_flip = False
-    config.eval_max_steps = 20
+    config.eval_max_steps = 50
     config.difficulty_level = 2
     task_configs.append(config)
 
@@ -430,7 +430,7 @@ if __name__ == '__main__':
     config.eval_display_mode = "middle"
     config.eval_random_rotate = False
     config.eval_random_flip = False
-    config.eval_max_steps = 20
+    config.eval_max_steps = 50
     config.difficulty_level = 3
     task_configs.append(config)
 
@@ -447,7 +447,7 @@ if __name__ == '__main__':
     config.eval_display_mode = "middle"
     config.eval_random_rotate = False
     config.eval_random_flip = False
-    config.eval_max_steps = 50
+    config.eval_max_steps = 100
     config.difficulty_level = 4
     task_configs.append(config)
 

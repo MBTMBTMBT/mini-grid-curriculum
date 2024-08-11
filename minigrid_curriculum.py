@@ -224,6 +224,7 @@ class CurriculumRunner:
             eval_deterministic: bool,
             force_sequential: bool = False,
             start_time_step: int = 0,
+            load_best: bool = False
     ):
         """
         Trainer function for mini-grid curriculum
@@ -345,9 +346,14 @@ class CurriculumRunner:
 
             # Load or create a new model
             best_path = os.path.join(model_save_dir, f"task_{i}_best.zip")
+            latest_path = os.path.join(model_save_dir, f"task_{i}_latest.zip")
             if os.path.exists(best_path):
-                model = PPO.load(best_path, env=env)
-                print(f"Loaded model from {best_path}.")
+                if load_best:
+                    model = PPO.load(best_path, env=env)
+                    print(f"Loaded model from {best_path}.")
+                else:
+                    model = PPO.load(latest_path, env=env)
+                    print(f"Loaded model from {latest_path}.")
             else:
                 model = PPO("MlpPolicy", env, verbose=1)
                 print("Initialized new model.")

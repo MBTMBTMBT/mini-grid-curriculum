@@ -1,7 +1,7 @@
 import numpy as np
 
 from customize_minigrid.wrappers import FullyObsSB3MLPWrapper
-from mdp_graph.mdp_graph import MDPGraph
+from mdp_graph.mdp_graph import MDPGraph, PolicyGraph, OptimalPolicyGraph
 
 
 def numpy_binary_array_to_string(binary_array):
@@ -64,8 +64,8 @@ if __name__ == '__main__':
     from customize_minigrid.custom_env import CustomEnv
     # Initialize the environment and wrapper
     env = CustomEnv(
-        txt_file_path='maps/door_key.txt',
-        display_size=10,
+        txt_file_path='maps/big_maze.txt',
+        display_size=13,
         display_mode="random",
         random_rotate=True,
         random_flip=True,
@@ -75,3 +75,7 @@ if __name__ == '__main__':
     env = FullyObsSB3MLPWrapper(env, to_print=False)
     learner = OneHotEncodingMDPLearner(env)
     learner.learn()
+    optimal_graph = OptimalPolicyGraph()
+    optimal_graph.load_graph(learner.mdp_graph)
+    optimal_graph.compute_optimal_policy(0.99, threshold=1e-3)
+    optimal_graph.visualize(use_grid_layout=False, display_state_name=False)

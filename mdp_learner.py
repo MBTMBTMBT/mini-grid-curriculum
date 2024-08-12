@@ -20,6 +20,7 @@ class OneHotEncodingMDPLearner:
         self.env = onehot_env
         self.state_set = set()
         self.state_action_set = set()
+        self.start_state = None
         self.done_state = None
         self.possible_actions = list(range(self.env.action_space.n))
         self.mdp_graph: MDPGraph = MDPGraph()
@@ -28,6 +29,7 @@ class OneHotEncodingMDPLearner:
         obs, _ = self.env.reset()
         current_state_code = numpy_binary_array_to_string(obs)
         self.state_set.add(current_state_code)
+        self.start_state = current_state_code
         state_action_count = 0
         while True:
             new_state_set = set()
@@ -64,7 +66,7 @@ if __name__ == '__main__':
     from customize_minigrid.custom_env import CustomEnv
     # Initialize the environment and wrapper
     env = CustomEnv(
-        txt_file_path='maps/big_maze.txt',
+        txt_file_path='maps/door_key.txt',
         display_size=13,
         display_mode="random",
         random_rotate=True,
@@ -77,5 +79,8 @@ if __name__ == '__main__':
     learner.learn()
     optimal_graph = OptimalPolicyGraph()
     optimal_graph.load_graph(learner.mdp_graph)
-    optimal_graph.compute_optimal_policy(0.99, threshold=1e-3)
-    optimal_graph.visualize(use_grid_layout=False, display_state_name=False)
+    optimal_graph.value_iteration(0.999, threshold=1e-5)
+    optimal_graph.compute_optimal_policy(0.999, threshold=1e-5)
+    optimal_graph.control_info_iteration(1.0, threshold=1e-5)
+    optimal_graph.visualize(highlight_states=[learner.start_state, learner.done_state], use_grid_layout=False, display_state_name=False)
+    optimal_graph.visualize_policy_and_control_info(highlight_states=[learner.start_state, learner.done_state], use_grid_layout=False, display_state_name=False)

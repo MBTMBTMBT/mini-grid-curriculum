@@ -19,11 +19,15 @@ def sample_model_with_onehot_encoding(
     device = next(model.policy.parameters()).device
     with torch.no_grad():
         for state in states:
-            state = string_to_numpy_binary_array(state)
-            obs_tensor = torch.tensor([state], dtype=torch.float32, device=device).unsqueeze(0)
+            obs_tensor = string_to_numpy_binary_array(state)
+            obs_tensor = torch.tensor(obs_tensor, dtype=torch.float32, device=device).unsqueeze(0)
             _, action_logits, _ = model.policy.evaluate_actions(obs_tensor, torch.tensor([actions], device=device))
-            action_probs = torch.nn.functional.softmax(action_logits, dim=-1)
-            pass
+            action_probs = torch.nn.functional.softmax(action_logits, dim=-1).cpu().squeeze().numpy().tolist()
+            for action, action_prob in zip(actions, action_probs):
+                if sample_as_prior:
+                    policy_graph.set_prior_prob(state, action, action_prob)
+                else:
+                    policy_graph.set_state_prob(state, action, action_prob)
 
 
 if __name__ == '__main__':
@@ -53,7 +57,9 @@ if __name__ == '__main__':
     optimal_graph.compute_optimal_policy(0.999, threshold=1e-5)
 
     model = PPO("MlpPolicy", env)
-    sample_model_with_onehot_encoding(model, learner.state_set, learner.possible_actions, optimal_graph, sample_as_prior=True)
+    sample_model_with_onehot_encoding(
+        model, learner.state_set, learner.possible_actions, optimal_graph, sample_as_prior=True
+    )
 
     optimal_graph.control_info_iteration(1.0, threshold=1e-5)
     optimal_graph.value_iteration(1.0, threshold=1e-5)

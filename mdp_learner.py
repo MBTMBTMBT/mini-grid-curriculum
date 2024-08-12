@@ -21,7 +21,7 @@ class OneHotEncodingMDPLearner:
         self.state_set = set()
         self.state_action_set = set()
         self.start_state = None
-        self.done_state = None
+        self.done_states = set()
         self.possible_actions = list(range(self.env.action_space.n))
         self.mdp_graph: MDPGraph = MDPGraph()
 
@@ -36,7 +36,7 @@ class OneHotEncodingMDPLearner:
             new_state_action_set = set()
             for current_state_code in self.state_set:
                 current_state_obs = string_to_numpy_binary_array(current_state_code)
-                if self.done_state == current_state_code:
+                if current_state_code in self.done_states:
                     continue
                 for action in self.possible_actions:
                     current_state_action_code = str(current_state_code) + str(action)
@@ -45,7 +45,7 @@ class OneHotEncodingMDPLearner:
                         next_obs, reward, done, truncated, info = self.env.step(action)
                         next_state_code = numpy_binary_array_to_string(next_obs)
                         if done:
-                            self.done_state = next_state_code
+                            self.done_states.add(next_state_code)
                         if current_state_action_code not in self.state_action_set:
                             new_state_action_set.add(current_state_action_code)
                         if next_state_code not in self.state_set:
@@ -66,7 +66,7 @@ if __name__ == '__main__':
     from customize_minigrid.custom_env import CustomEnv
     # Initialize the environment and wrapper
     env = CustomEnv(
-        txt_file_path='maps/little_square.txt',
+        txt_file_path='maps/door_key.txt',
         display_size=13,
         display_mode="random",
         random_rotate=True,
@@ -79,18 +79,18 @@ if __name__ == '__main__':
     learner.learn()
     optimal_graph = OptimalPolicyGraph()
     optimal_graph.load_graph(learner.mdp_graph)
+    optimal_graph.visualize(highlight_states=[learner.start_state, *learner.done_states], use_grid_layout=False, display_state_name=False)
     optimal_graph.optimal_value_iteration(0.999, threshold=1e-5)
     optimal_graph.compute_optimal_policy(0.999, threshold=1e-5)
     optimal_graph.control_info_iteration(1.0, threshold=1e-5)
     optimal_graph.value_iteration(1.0, threshold=1e-5)
     optimal_policy = optimal_graph.get_free_energy(beta=1e1)
-    optimal_graph.visualize(highlight_states=[learner.start_state, learner.done_state], use_grid_layout=False, display_state_name=False)
     optimal_graph.visualize_policy_and_values(title="Policy and Values", value_type="value",
-                                              highlight_states=[learner.start_state, learner.done_state],
+                                              highlight_states=[learner.start_state, *learner.done_states],
                                               use_grid_layout=False, display_state_name=False)
     optimal_graph.visualize_policy_and_values(title="Policy and Control Info", value_type="control_info",
-                                              highlight_states=[learner.start_state, learner.done_state],
+                                              highlight_states=[learner.start_state, *learner.done_states],
                                               use_grid_layout=False, display_state_name=False)
     optimal_graph.visualize_policy_and_values(title="Policy and Free Energy", value_type="free_energy",
-                                              highlight_states=[learner.start_state, learner.done_state],
+                                              highlight_states=[learner.start_state, *learner.done_states],
                                               use_grid_layout=False, display_state_name=False)

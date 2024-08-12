@@ -51,7 +51,7 @@ class OneHotEncodingMDPLearner:
                         if next_state_code not in self.state_set:
                             new_state_set.add(next_state_code)
                         state_action_count += 1
-                        print(f"Added [state-action pair num: {state_action_count}]: {hash(current_state_action_code)} -- {action} -> {hash(next_state_code)}")
+                        print(f"Added [state-action pair num: {state_action_count}]: {hash(current_state_action_code)} -- {action} -> {hash(next_state_code)} Reward: {reward}")
                         self.mdp_graph.add_transition(current_state_code, action, next_state_code, 1.0)
                         self.mdp_graph.add_reward(current_state_code, action, next_state_code, float(reward))
             for new_state_code in new_state_set:
@@ -66,13 +66,13 @@ if __name__ == '__main__':
     from customize_minigrid.custom_env import CustomEnv
     # Initialize the environment and wrapper
     env = CustomEnv(
-        txt_file_path='maps/door_key.txt',
+        txt_file_path='maps/little_square.txt',
         display_size=13,
         display_mode="random",
         random_rotate=True,
         random_flip=True,
         custom_mission="Find the key and open the door.",
-        render_mode="human",
+        render_mode=None,
     )
     env = FullyObsSB3MLPWrapper(env, to_print=False)
     learner = OneHotEncodingMDPLearner(env)
@@ -83,7 +83,7 @@ if __name__ == '__main__':
     optimal_graph.compute_optimal_policy(0.999, threshold=1e-5)
     optimal_graph.control_info_iteration(1.0, threshold=1e-5)
     optimal_graph.value_iteration(1.0, threshold=1e-5)
-    optimal_policy = optimal_graph.get_free_energy(beta=1.0)
+    optimal_policy = optimal_graph.get_free_energy(beta=1e1)
     optimal_graph.visualize(highlight_states=[learner.start_state, learner.done_state], use_grid_layout=False, display_state_name=False)
     optimal_graph.visualize_policy_and_values(title="Policy and Values", value_type="value",
                                               highlight_states=[learner.start_state, learner.done_state],

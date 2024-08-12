@@ -72,15 +72,25 @@ if __name__ == '__main__':
         random_rotate=True,
         random_flip=True,
         custom_mission="Find the key and open the door.",
-        render_mode=None
+        render_mode="human",
     )
     env = FullyObsSB3MLPWrapper(env, to_print=False)
     learner = OneHotEncodingMDPLearner(env)
     learner.learn()
     optimal_graph = OptimalPolicyGraph()
     optimal_graph.load_graph(learner.mdp_graph)
-    optimal_graph.value_iteration(0.999, threshold=1e-5)
+    optimal_graph.optimal_value_iteration(0.999, threshold=1e-5)
     optimal_graph.compute_optimal_policy(0.999, threshold=1e-5)
     optimal_graph.control_info_iteration(1.0, threshold=1e-5)
+    optimal_graph.value_iteration(1.0, threshold=1e-5)
+    optimal_policy = optimal_graph.get_free_energy(beta=1.0)
     optimal_graph.visualize(highlight_states=[learner.start_state, learner.done_state], use_grid_layout=False, display_state_name=False)
-    optimal_graph.visualize_policy_and_control_info(highlight_states=[learner.start_state, learner.done_state], use_grid_layout=False, display_state_name=False)
+    optimal_graph.visualize_policy_and_values(title="Policy and Values", value_type="value",
+                                              highlight_states=[learner.start_state, learner.done_state],
+                                              use_grid_layout=False, display_state_name=False)
+    optimal_graph.visualize_policy_and_values(title="Policy and Control Info", value_type="control_info",
+                                              highlight_states=[learner.start_state, learner.done_state],
+                                              use_grid_layout=False, display_state_name=False)
+    optimal_graph.visualize_policy_and_values(title="Policy and Free Energy", value_type="free_energy",
+                                              highlight_states=[learner.start_state, learner.done_state],
+                                              use_grid_layout=False, display_state_name=False)

@@ -82,6 +82,7 @@ if __name__ == '__main__':
     optimal_graph = OptimalPolicyGraph()
     optimal_graph.load_graph(learner.mdp_graph)
     optimal_graph.visualize(highlight_states=[learner.start_state, *learner.done_states], use_grid_layout=False, display_state_name=False)
+    optimal_graph.uniform_prior_policy()
     optimal_graph.optimal_value_iteration(0.999, threshold=1e-5)
     optimal_graph.compute_optimal_policy(0.999, threshold=1e-5)
     optimal_graph.control_info_iteration(1.0, threshold=1e-5)

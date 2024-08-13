@@ -4,3 +4,6 @@
 [submodule "mdp_graph"]
 	path = mdp_graph
 	url = https://github.com/MBTMBTMBT/mdp_graph.git
+[submodule "binary_state_representation"]
+	path = binary_state_representation
+	url = https://github.com/MBTMBTMBT/binary-state-representation.git

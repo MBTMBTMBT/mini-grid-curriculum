@@ -257,7 +257,7 @@ if __name__ == '__main__':
     config.train_random_rotate = True
     config.train_random_flip = True
     config.train_max_steps = 500
-    config.train_total_steps = 5e5
+    config.train_total_steps = 2e5
     config.eval_display_mode = "middle"
     config.eval_random_rotate = False
     config.eval_random_flip = False
@@ -274,7 +274,24 @@ if __name__ == '__main__':
     config.train_random_rotate = True
     config.train_random_flip = True
     config.train_max_steps = 500
-    config.train_total_steps = 5e5
+    config.train_total_steps = 2e5
+    config.eval_display_mode = "middle"
+    config.eval_random_rotate = False
+    config.eval_random_flip = False
+    config.eval_max_steps = 50
+    config.difficulty_level = 1
+    task_configs.append(config)
+
+    config = TaskConfig()
+    config.name = "extra_long_corridor"
+    config.txt_file_path = r"./maps/extra_long_corridor.txt"
+    config.custom_mission = "reach the goal"
+    config.minimum_display_size = 11
+    config.train_display_mode = "random"
+    config.train_random_rotate = True
+    config.train_random_flip = True
+    config.train_max_steps = 500
+    config.train_total_steps = 2e5
     config.eval_display_mode = "middle"
     config.eval_random_rotate = False
     config.eval_random_flip = False

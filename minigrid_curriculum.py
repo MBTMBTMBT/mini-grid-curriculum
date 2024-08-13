@@ -282,56 +282,56 @@ if __name__ == '__main__':
     config.difficulty_level = 1
     task_configs.append(config)
 
-    config = TaskConfig()
-    config.name = "square_space"
-    config.txt_file_path = r"./maps/square_space.txt"
-    config.custom_mission = "reach the goal"
-    config.minimum_display_size = 7
-    config.train_display_mode = "random"
-    config.train_random_rotate = True
-    config.train_random_flip = True
-    config.train_max_steps = 1000
-    config.train_total_steps = 5e5
-    config.eval_display_mode = "middle"
-    config.eval_random_rotate = False
-    config.eval_random_flip = False
-    config.eval_max_steps = 50
-    config.difficulty_level = 2
-    task_configs.append(config)
-
-    config = TaskConfig()
-    config.name = "small_maze"
-    config.txt_file_path = r"./maps/small_maze.txt"
-    config.custom_mission = "reach the goal"
-    config.minimum_display_size = 7
-    config.train_display_mode = "random"
-    config.train_random_rotate = True
-    config.train_random_flip = True
-    config.train_max_steps = 1000
-    config.train_total_steps = 5e5
-    config.eval_display_mode = "middle"
-    config.eval_random_rotate = False
-    config.eval_random_flip = False
-    config.eval_max_steps = 50
-    config.difficulty_level = 3
-    task_configs.append(config)
-
-    config = TaskConfig()
-    config.name = "big_maze"
-    config.txt_file_path = r"./maps/big_maze.txt"
-    config.custom_mission = "reach the goal"
-    config.minimum_display_size = 13
-    config.train_display_mode = "random"
-    config.train_random_rotate = True
-    config.train_random_flip = True
-    config.train_max_steps = 2000
-    config.train_total_steps = 10e5
-    config.eval_display_mode = "middle"
-    config.eval_random_rotate = False
-    config.eval_random_flip = False
-    config.eval_max_steps = 100
-    config.difficulty_level = 4
-    task_configs.append(config)
+    # config = TaskConfig()
+    # config.name = "square_space"
+    # config.txt_file_path = r"./maps/square_space.txt"
+    # config.custom_mission = "reach the goal"
+    # config.minimum_display_size = 7
+    # config.train_display_mode = "random"
+    # config.train_random_rotate = True
+    # config.train_random_flip = True
+    # config.train_max_steps = 1000
+    # config.train_total_steps = 5e5
+    # config.eval_display_mode = "middle"
+    # config.eval_random_rotate = False
+    # config.eval_random_flip = False
+    # config.eval_max_steps = 50
+    # config.difficulty_level = 2
+    # task_configs.append(config)
+    #
+    # config = TaskConfig()
+    # config.name = "small_maze"
+    # config.txt_file_path = r"./maps/small_maze.txt"
+    # config.custom_mission = "reach the goal"
+    # config.minimum_display_size = 7
+    # config.train_display_mode = "random"
+    # config.train_random_rotate = True
+    # config.train_random_flip = True
+    # config.train_max_steps = 1000
+    # config.train_total_steps = 5e5
+    # config.eval_display_mode = "middle"
+    # config.eval_random_rotate = False
+    # config.eval_random_flip = False
+    # config.eval_max_steps = 50
+    # config.difficulty_level = 3
+    # task_configs.append(config)
+    #
+    # config = TaskConfig()
+    # config.name = "big_maze"
+    # config.txt_file_path = r"./maps/big_maze.txt"
+    # config.custom_mission = "reach the goal"
+    # config.minimum_display_size = 13
+    # config.train_display_mode = "random"
+    # config.train_random_rotate = True
+    # config.train_random_flip = True
+    # config.train_max_steps = 2000
+    # config.train_total_steps = 10e5
+    # config.eval_display_mode = "middle"
+    # config.eval_random_rotate = False
+    # config.eval_random_flip = False
+    # config.eval_max_steps = 100
+    # config.difficulty_level = 4
+    # task_configs.append(config)
 
     target_configs = []
 
@@ -339,7 +339,7 @@ if __name__ == '__main__':
     runner.train(
         session_dir="./experiments/curriculum_example",
         eval_freq=int(5e3),
-        compute_info_freq=int(1e4),
+        compute_info_freq=int(5e3),
         num_eval_episodes=100,
         eval_deterministic=False,
         force_sequential=True,

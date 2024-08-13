@@ -274,18 +274,18 @@ class InfoEvalSaveCallback(EvalSaveCallback):
                 max_iterations=self.max_iter,
             )
 
-            min_value = min(self.policy_graphs_agent_prior[env_name].policy_value)
-            mean_value = statistics.mean(self.policy_graphs_agent_prior[env_name].policy_value)
+            min_value = min(self.policy_graphs_agent_prior[env_name].policy_value.values())
+            mean_value = statistics.mean(self.policy_graphs_agent_prior[env_name].policy_value.values())
             start_position_value \
                 = self.policy_graphs_agent_prior[env_name].policy_value[self.mdp_learners[env_name].start_state]
 
-            min_control_info_gain = min(self.policy_graphs_agent_prior[env_name].control_info)
-            mean_control_info_gain = statistics.mean(self.policy_graphs_agent_prior[env_name].control_info)
+            min_control_info_gain = min(self.policy_graphs_agent_prior[env_name].control_info.values())
+            mean_control_info_gain = statistics.mean(self.policy_graphs_agent_prior[env_name].control_info.values())
             start_position_control_info_gain \
                 = self.policy_graphs_agent_prior[env_name].control_info[self.mdp_learners[env_name].start_state]
 
-            min_control_info = min(self.policy_graphs_uniform_prior[env_name].control_info)
-            mean_control_info = statistics.mean(self.policy_graphs_uniform_prior[env_name].control_info)
+            min_control_info = min(self.policy_graphs_uniform_prior[env_name].control_info.values())
+            mean_control_info = statistics.mean(self.policy_graphs_uniform_prior[env_name].control_info.values())
             start_position_control_info \
                 = self.policy_graphs_uniform_prior[env_name].control_info[self.mdp_learners[env_name].start_state]
 

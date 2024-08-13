@@ -46,8 +46,8 @@ def eval_envs(
             print(f"Evaluation of {env_name}: Mean reward: {mean_reward:.2f} +/- {std_reward:.2f}")
 
         # Log results to TensorBoard
-        log_writer.add_scalar(f'{env_name}/mean_reward', mean_reward, num_timesteps)
-        log_writer.add_scalar(f'{env_name}/std_reward', std_reward, num_timesteps)
+        log_writer.add_scalar(f'{env_name}/reward_mean', mean_reward, num_timesteps)
+        log_writer.add_scalar(f'{env_name}/reward_std', std_reward, num_timesteps)
 
         rewards.append(mean_reward)
 
@@ -279,20 +279,20 @@ class InfoEvalSaveCallback(EvalSaveCallback):
             start_position_value \
                 = self.policy_graphs_agent_prior[env_name].policy_value[self.mdp_learners[env_name].start_state]
 
-            min_control_info_gain = min(self.policy_graphs_agent_prior[env_name].control_info.values())
+            max_control_info_gain = max(self.policy_graphs_agent_prior[env_name].control_info.values())
             mean_control_info_gain = statistics.mean(self.policy_graphs_agent_prior[env_name].control_info.values())
             start_position_control_info_gain \
                 = self.policy_graphs_agent_prior[env_name].control_info[self.mdp_learners[env_name].start_state]
 
-            min_control_info = min(self.policy_graphs_uniform_prior[env_name].control_info.values())
+            max_control_info = max(self.policy_graphs_uniform_prior[env_name].control_info.values())
             mean_control_info = statistics.mean(self.policy_graphs_uniform_prior[env_name].control_info.values())
             start_position_control_info \
                 = self.policy_graphs_uniform_prior[env_name].control_info[self.mdp_learners[env_name].start_state]
 
             if self.verbose >= 1:
                 print(f"Value of {env_name}: min: {min_value:.2f}, mean:{mean_value:.2f}, start position: {start_position_value:.2f}")
-                print(f"Info Gain of {env_name}: min: {min_control_info_gain:.2f}, mean:{mean_control_info_gain:.2f}, start position: {start_position_control_info_gain:.2f}")
-                print(f"Control Info of {env_name}: min: {min_control_info:.2f}, mean:{mean_control_info:.2f}, start position: {start_position_control_info:.2f}")
+                print(f"Info Gain of {env_name}: max: {max_control_info_gain:.2f}, mean:{mean_control_info_gain:.2f}, start position: {start_position_control_info_gain:.2f}")
+                print(f"Control Info of {env_name}: max: {max_control_info:.2f}, mean:{mean_control_info:.2f}, start position: {start_position_control_info:.2f}")
 
             self.log_writer.add_scalar(
                 f'{env_name}/value_min', min_value, self.num_timesteps + self.start_timestep
@@ -304,7 +304,7 @@ class InfoEvalSaveCallback(EvalSaveCallback):
                 f'{env_name}/value_start_pos', start_position_value, self.num_timesteps + self.start_timestep
             )
             self.log_writer.add_scalar(
-                f'{env_name}/info_gain_min', min_control_info_gain, self.num_timesteps + self.start_timestep
+                f'{env_name}/info_gain_max', max_control_info_gain, self.num_timesteps + self.start_timestep
             )
             self.log_writer.add_scalar(
                 f'{env_name}/info_gain_mean', mean_control_info_gain, self.num_timesteps + self.start_timestep
@@ -313,7 +313,7 @@ class InfoEvalSaveCallback(EvalSaveCallback):
                 f'{env_name}/info_gain_start_pos', start_position_control_info_gain, self.num_timesteps + self.start_timestep
             )
             self.log_writer.add_scalar(
-                f'{env_name}/control_info_min', min_control_info, self.num_timesteps + self.start_timestep
+                f'{env_name}/control_info_max', max_control_info, self.num_timesteps + self.start_timestep
             )
             self.log_writer.add_scalar(
                 f'{env_name}/control_info_mean', mean_control_info, self.num_timesteps + self.start_timestep

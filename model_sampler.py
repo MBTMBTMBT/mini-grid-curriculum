@@ -1,13 +1,13 @@
 from typing import Set, Hashable, List
 import torch
-from stable_baselines3 import PPO
+from stable_baselines3.common.base_class import BaseAlgorithm
 
 from mdp_graph.mdp_graph import PolicyGraph
 from mdp_learner import string_to_numpy_binary_array
 
 
 def sample_model_with_onehot_encoding(
-        model: PPO,
+        model: BaseAlgorithm,
         states: Set[Hashable],
         actions: List[Hashable],
         policy_graph: PolicyGraph,
@@ -31,6 +31,7 @@ def sample_model_with_onehot_encoding(
 
 
 if __name__ == '__main__':
+    from stable_baselines3 import PPO
     from customize_minigrid.wrappers import FullyObsSB3MLPWrapper
     from customize_minigrid.custom_env import CustomEnv
     from mdp_graph.mdp_graph import OptimalPolicyGraph

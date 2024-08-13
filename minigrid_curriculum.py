@@ -1,16 +1,13 @@
 import os
-import numpy as np
-from typing import Dict, List, Union
+from typing import Dict, List
 
-from gymnasium import Env
 from stable_baselines3 import PPO
-from stable_baselines3.common.type_aliases import PolicyPredictor
 from torch.utils.tensorboard import SummaryWriter
+
+from callbacks import EvalCallback, EvalSaveCallback, InfoEvalSaveCallback
 from customize_minigrid.custom_env import CustomEnv
-from stable_baselines3.common.vec_env import DummyVecEnv, VecMonitor, VecEnv
-from stable_baselines3.common.callbacks import EventCallback, CallbackList
-from stable_baselines3.common.evaluation import evaluate_policy
-import gymnasium as gym
+from stable_baselines3.common.vec_env import DummyVecEnv, VecMonitor
+from stable_baselines3.common.callbacks import CallbackList
 
 from customize_minigrid.wrappers import FullyObsSB3MLPWrapper
 
@@ -53,150 +50,6 @@ class TargetConfig:
         self.max_steps: int = 0
 
 
-def eval_envs(
-        envs: List[VecEnv],
-        env_names: List[str],
-        model: PolicyPredictor,
-        num_eval_episodes: int,
-        deterministic: bool,
-        log_writer: SummaryWriter,
-        num_timesteps: int,
-        verbose: int = 1,
-) -> float:
-    print("Time step: ", num_timesteps)
-    rewards = []
-    for env, env_name in zip(envs, env_names):
-        episode_rewards, _ = evaluate_policy(
-            model,
-            env,
-            n_eval_episodes=num_eval_episodes,
-            deterministic=deterministic,
-            return_episode_rewards=True,
-        )
-
-        mean_reward = np.mean(episode_rewards)
-        std_reward = np.std(episode_rewards)
-
-        # Log results
-        if verbose >= 1:
-            print(f"Evaluation of {env_name}: Mean reward: {mean_reward:.2f} +/- {std_reward:.2f}")
-
-        # Log results to TensorBoard
-        log_writer.add_scalar(f'{env_name}/mean_reward', mean_reward, num_timesteps)
-        log_writer.add_scalar(f'{env_name}/std_reward', std_reward, num_timesteps)
-
-        rewards.append(mean_reward)
-
-    return np.mean(rewards)
-
-
-class EvalCallback(EventCallback):
-    def __init__(
-            self,
-            eval_envs: List[VecEnv],
-            eval_env_names: List[str],
-            log_writer: SummaryWriter,
-            eval_freq: int,
-            n_eval_episodes: int,
-            deterministic: bool = True,
-            verbose: int = 1,
-            start_timestep: int = 0,
-    ):
-        super().__init__(verbose=verbose)
-        self.eval_envs = eval_envs
-        self.eval_env_names = eval_env_names
-        self.eval_freq = eval_freq
-        self.n_eval_episodes = n_eval_episodes
-        self.deterministic = deterministic
-        self.log_writer = log_writer
-        self.evaluations: List[float] = []
-        self.start_timestep = start_timestep
-
-    def _on_step(self) -> bool:
-        # Evaluate the model at specified frequency
-        if self.n_calls % self.eval_freq == 0:
-            self.eval()
-        return True
-
-    def _on_training_end(self) -> None:
-        self.eval()
-
-    def eval(self):
-        print("Evaluating model over targets...")
-        mean_reward = eval_envs(
-            envs=self.eval_envs,
-            env_names=self.eval_env_names,
-            model=self.model,
-            num_eval_episodes=self.n_eval_episodes,
-            deterministic=self.deterministic,
-            log_writer=self.log_writer,
-            num_timesteps=self.num_timesteps + self.start_timestep,
-            verbose=self.verbose,
-        )
-
-
-class EvalSaveCallback(EventCallback):
-    def __init__(
-            self,
-            eval_envs: List[VecEnv],
-            eval_env_names: List[str],
-            model_save_dir: str,
-            model_save_name: str,
-            log_writer: SummaryWriter,
-            eval_freq: int,
-            n_eval_episodes: int,
-            deterministic: bool = True,
-            verbose: int = 1,
-            start_timestep: int = 0,
-    ):
-        super().__init__(verbose=verbose)
-        self.eval_envs = eval_envs
-        self.eval_env_names = eval_env_names
-        self.eval_freq = eval_freq
-        self.n_eval_episodes = n_eval_episodes
-        self.deterministic = deterministic
-        self.best_mean_reward = -np.inf
-        self.model_save_dir = model_save_dir
-        self.model_save_name = model_save_name
-        self.log_writer = log_writer
-        self.evaluations: List[float] = []
-        self.start_timestep = start_timestep
-
-    def _on_step(self) -> bool:
-        # Evaluate the model at specified frequency
-        if self.n_calls % self.eval_freq == 0:
-            self.eval()
-        return True
-
-    def _on_training_end(self) -> None:
-        self.eval()
-
-    def eval(self):
-        print("Evaluating model...")
-        mean_reward = eval_envs(
-            envs=self.eval_envs,
-            env_names=self.eval_env_names,
-            model=self.model,
-            num_eval_episodes=self.n_eval_episodes,
-            deterministic=self.deterministic,
-            log_writer=self.log_writer,
-            num_timesteps=self.num_timesteps + self.start_timestep,
-            verbose=self.verbose,
-        )
-
-        latest_path = os.path.join(self.model_save_dir, f"{self.model_save_name}_latest.zip")
-        self.model.save(latest_path)
-        if self.verbose >= 1:
-            print(f"Saved latest model to {latest_path}")
-
-        best_path = os.path.join(self.model_save_dir, f"{self.model_save_name}_best.zip")
-        if mean_reward > self.best_mean_reward:
-            self.best_mean_reward = mean_reward
-            self.model.save(best_path)
-            if self.verbose >= 1:
-                print(f"New best model with mean reward {mean_reward:.2f} saved to {best_path}")
-
-
 class CurriculumRunner:
     def __init__(
             self,
@@ -220,11 +73,15 @@ class CurriculumRunner:
             self,
             session_dir: str,
             eval_freq: int,
+            compute_info_freq: int,
             num_eval_episodes: int,
             eval_deterministic: bool,
             force_sequential: bool = False,
             start_time_step: int = 0,
-            load_best: bool = False
+            load_best: bool = False,
+            iter_gamma: float = 0.999,
+            iter_threshold: float = 1e-5,
+            max_iter: int = 1e5,
     ):
         """
         Trainer function for mini-grid curriculum
@@ -315,6 +172,25 @@ class CurriculumRunner:
         for i in range(len(train_env_list)):
             print(f"Training stage [{i+1} / {len(train_env_list)}]:")
             print(f"Time step starts from: {start_time_step}...")
+
+            # get environment for this round
+            env = train_env_list[i]
+
+            # Load or create a new model
+            best_path = os.path.join(model_save_dir, f"task_{i}_best.zip")
+            latest_path = os.path.join(model_save_dir, f"task_{i}_latest.zip")
+            if os.path.exists(best_path):
+                if load_best:
+                    model = PPO.load(best_path, env=env)
+                    print(f"Loaded model from {best_path}.")
+                else:
+                    model = PPO.load(latest_path, env=env)
+                    print(f"Loaded model from {latest_path}.")
+            else:
+                model = PPO("MlpPolicy", env, verbose=1)
+                print("Initialized new model.")
+            pass
+
             # make call back function for testing.
             target_callback = EvalCallback(
                 eval_envs=target_env_list,
@@ -338,26 +214,26 @@ class CurriculumRunner:
                 verbose=1,
                 start_timestep=start_time_step,
             )
+            info_eval_callback = InfoEvalSaveCallback(
+                eval_envs=eval_env_list,
+                eval_env_names=eval_env_name_list,
+                model=model,
+                model_save_dir=model_save_dir,
+                model_save_name=f"task_{i + 1}",
+                log_writer=log_writer,
+                eval_freq=eval_freq,
+                compute_info_freq=compute_info_freq,
+                n_eval_episodes=num_eval_episodes,
+                deterministic=eval_deterministic,
+                verbose=1,
+                start_timestep=start_time_step,
+                iter_gamma=iter_gamma,
+                iter_threshold=iter_threshold,
+                max_iter=max_iter,
+            )
 
-            callback_list = CallbackList(callbacks=[target_callback, eval_callback])
-
-            # get environment for this round
-            env = train_env_list[i]
-
-            # Load or create a new model
-            best_path = os.path.join(model_save_dir, f"task_{i}_best.zip")
-            latest_path = os.path.join(model_save_dir, f"task_{i}_latest.zip")
-            if os.path.exists(best_path):
-                if load_best:
-                    model = PPO.load(best_path, env=env)
-                    print(f"Loaded model from {best_path}.")
-                else:
-                    model = PPO.load(latest_path, env=env)
-                    print(f"Loaded model from {latest_path}.")
-            else:
-                model = PPO("MlpPolicy", env, verbose=1)
-                print("Initialized new model.")
-            pass
+            # callback_list = CallbackList(callbacks=[target_callback, eval_callback])
+            callback_list = CallbackList(callbacks=[info_eval_callback,])
 
             # train
             model.learn(total_timesteps=train_env_step_list[i], callback=callback_list, progress_bar=True)
@@ -463,8 +339,12 @@ if __name__ == '__main__':
     runner.train(
         session_dir="./experiments/curriculum_example",
         eval_freq=int(5e3),
+        compute_info_freq=int(1e4),
         num_eval_episodes=100,
         eval_deterministic=False,
         force_sequential=True,
         start_time_step=0,
+        iter_gamma=0.999,
+        iter_threshold=1e-5,
+        max_iter=int(1e5),
     )

@@ -357,7 +357,7 @@ if __name__ == '__main__':
         session_dir="./experiments/curriculum_example",
         eval_freq=int(5e3),
         compute_info_freq=int(5e3),
-        num_eval_episodes=100,
+        num_eval_episodes=50,
         eval_deterministic=False,
         force_sequential=True,
         start_time_step=0,

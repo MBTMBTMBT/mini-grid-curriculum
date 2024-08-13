@@ -61,6 +61,8 @@ class OneHotEncodingMDPLearner:
             if len(new_state_set) == 0 and len(new_state_action_set) == 0:
                 break
 
+        self.env.force_reset()
+
 
 if __name__ == '__main__':
     from customize_minigrid.custom_env import CustomEnv

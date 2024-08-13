@@ -192,28 +192,28 @@ class CurriculumRunner:
             pass
 
             # make call back function for testing.
-            target_callback = EvalCallback(
-                eval_envs=target_env_list,
-                eval_env_names=target_env_name_list,
-                log_writer=log_writer,
-                eval_freq=eval_freq,
-                n_eval_episodes=num_eval_episodes,
-                deterministic=eval_deterministic,
-                verbose=1,
-                start_timestep=start_time_step,
-            )
-            eval_callback = EvalSaveCallback(
-                eval_envs=eval_env_list,
-                eval_env_names=eval_env_name_list,
-                model_save_dir=model_save_dir,
-                model_save_name=f"task_{i+1}",
-                log_writer=log_writer,
-                eval_freq=eval_freq,
-                n_eval_episodes=num_eval_episodes,
-                deterministic=eval_deterministic,
-                verbose=1,
-                start_timestep=start_time_step,
-            )
+            # target_callback = EvalCallback(
+            #     eval_envs=target_env_list,
+            #     eval_env_names=target_env_name_list,
+            #     log_writer=log_writer,
+            #     eval_freq=eval_freq,
+            #     n_eval_episodes=num_eval_episodes,
+            #     deterministic=eval_deterministic,
+            #     verbose=1,
+            #     start_timestep=start_time_step,
+            # )
+            # eval_callback = EvalSaveCallback(
+            #     eval_envs=eval_env_list,
+            #     eval_env_names=eval_env_name_list,
+            #     model_save_dir=model_save_dir,
+            #     model_save_name=f"task_{i+1}",
+            #     log_writer=log_writer,
+            #     eval_freq=eval_freq,
+            #     n_eval_episodes=num_eval_episodes,
+            #     deterministic=eval_deterministic,
+            #     verbose=1,
+            #     start_timestep=start_time_step,
+            # )
             info_eval_callback = InfoEvalSaveCallback(
                 eval_envs=eval_env_list,
                 eval_env_names=eval_env_name_list,
@@ -239,7 +239,7 @@ class CurriculumRunner:
             model.learn(total_timesteps=train_env_step_list[i], callback=callback_list, progress_bar=True)
 
             # accumulated timestep
-            start_time_step += eval_callback.num_timesteps
+            start_time_step += info_eval_callback.num_timesteps
 
         # close the writer
         log_writer.close()

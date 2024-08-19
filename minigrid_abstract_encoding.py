@@ -30,7 +30,7 @@ class OneHotDataset(Dataset):
             is_terminated = True
 
         state0 = torch.tensor(string_to_numpy_binary_array(state0), dtype=torch.float32)
-        action = torch.tensor(action, dtype=torch.float32)
+        action = torch.tensor(int(action), dtype=torch.int64)
         state1 = torch.tensor(string_to_numpy_binary_array(state1), dtype=torch.float32)
         reward = torch.tensor(reward, dtype=torch.float32)
         is_terminated = torch.tensor(is_terminated, dtype=torch.float32)
@@ -45,7 +45,7 @@ def train_epoch(
         writer: SummaryWriter,
         step_counter: int
 ):
-    num_terminals = len(dataset.done_state_action_states)
+    num_terminals = len(dataset.done_state_action_state_set)
     if batch_size >= num_terminals * 10:
         keep_terminals = num_terminals
     else:
@@ -119,7 +119,7 @@ if __name__ == '__main__':
         ),
         FullyObsSB3MLPWrapper(
             CustomEnv(
-                txt_file_path=r"./maps/extra_corridor.txt",
+                txt_file_path=r"./maps/extra_long_corridor.txt",
                 display_size=11,
                 display_mode="random",
                 random_rotate=True,
@@ -155,7 +155,7 @@ if __name__ == '__main__':
         ),
         FullyObsSB3MLPWrapper(
             CustomEnv(
-                txt_file_path=r"./maps/extra_corridor.txt",
+                txt_file_path=r"./maps/extra_long_corridor.txt",
                 display_size=11,
                 display_mode="middle",
                 random_rotate=False,
@@ -177,8 +177,10 @@ if __name__ == '__main__':
     LR = 1e-4
 
     # train configs
-    EPOCHS = 160
-    SAVE_FREQ = 1
+    EPOCHS = 1000
+    RESAMPLE_FREQ = 10
+    RESET_TIMES = 10
+    SAVE_FREQ = 20
 
     session_name = "experiments/learn_feature_bin"
 
@@ -209,22 +211,27 @@ if __name__ == '__main__':
 
     state_action_state_to_reward_dict = {}
     done_state_action_state_set = set()
-
-    for env in train_list_envs:
-        learner = OneHotEncodingMDPLearner(env)
-        learner.learn()
-        state_action_state_to_reward_dict.update(learner.state_action_state_to_reward_dict)
-        done_state_action_state_set.update(learner.done_state_action_state_set)
-
-    print(f"Number of transition pairs: {len(state_action_state_to_reward_dict)}")
-    print(f"Number of terminals: {len(done_state_action_state_set)}")
-
     dataset = OneHotDataset(state_action_state_to_reward_dict, done_state_action_state_set)
 
     progress_bar = tqdm(range(epoch_counter, EPOCHS), desc=f'Training Epoch {epoch_counter}')
     for i, batch in enumerate(progress_bar):
-        loss_val = 0.0
-        loss, step_counter = train_epoch(dataset, BATCH_SIZE, model, tb_writer, step_counter)
+        if epoch_counter % RESAMPLE_FREQ == 0:
+            state_action_state_to_reward_dict = {}
+            done_state_action_state_set = set()
+
+            for _ in range(RESET_TIMES):
+                for env in train_list_envs:
+                    learner = OneHotEncodingMDPLearner(env)
+                    learner.learn()
+                    state_action_state_to_reward_dict.update(learner.state_action_state_to_reward_dict)
+                    done_state_action_state_set.update(learner.done_state_action_state_set)
+
+            print(f"Number of transition pairs: {len(state_action_state_to_reward_dict)}")
+            print(f"Number of terminals: {len(done_state_action_state_set)}")
+
+            dataset = OneHotDataset(state_action_state_to_reward_dict, done_state_action_state_set)
+
+        loss_val, step_counter = train_epoch(dataset, BATCH_SIZE, model, tb_writer, step_counter)
 
         if epoch_counter % SAVE_FREQ == 0:
             model.save(f"{session_name}/model_epoch_{epoch_counter}.pth", epoch_counter, step_counter, performance)

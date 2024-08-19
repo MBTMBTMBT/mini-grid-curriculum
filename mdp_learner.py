@@ -25,6 +25,9 @@ class OneHotEncodingMDPLearner:
         self.possible_actions = list(range(self.env.action_space.n))
         self.mdp_graph: MDPGraph = MDPGraph()
 
+        self.state_action_state_to_reward_dict = {}
+        self.done_state_action_state = set()
+
     def learn(self):
         obs, _ = self.env.reset()
         current_state_code = numpy_binary_array_to_string(obs)
@@ -39,17 +42,24 @@ class OneHotEncodingMDPLearner:
                 if current_state_code in self.done_states:
                     continue
                 for action in self.possible_actions:
-                    current_state_action_code = str(current_state_code) + str(action)
+                    current_state_action_code = str(current_state_code) + "-" + str(action)
                     if current_state_action_code not in self.state_action_set:
                         self.env.set_env_with_code(current_state_obs)
                         next_obs, reward, done, truncated, info = self.env.step(action)
                         next_state_code = numpy_binary_array_to_string(next_obs)
+
+                        current_state_action_state_code = str(current_state_code) + "-" + str(action) + "-" + str(next_state_code)
+                        self.state_action_state_to_reward_dict[current_state_action_state_code] = reward
+
                         if done:
                             self.done_states.add(next_state_code)
+                            self.done_state_action_state.add(current_state_action_state_code)
+
                         if current_state_action_code not in self.state_action_set:
                             new_state_action_set.add(current_state_action_code)
                         if next_state_code not in self.state_set:
                             new_state_set.add(next_state_code)
+
                         state_action_count += 1
                         print(f"Added [state-action pair num: {state_action_count}]: {hash(current_state_action_code)} -- {action} -> {hash(next_state_code)} Reward: {reward}")
                         self.mdp_graph.add_transition(current_state_code, action, next_state_code, 1.0)

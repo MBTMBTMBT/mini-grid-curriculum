@@ -89,7 +89,7 @@ if __name__ == '__main__':
     )
     env = FullyObsSB3MLPWrapper(env, to_print=False)
     learner = OneHotEncodingMDPLearner(env)
-    learner.learn()
+    learner.learn(verbose=1)
     optimal_graph = OptimalPolicyGraph()
     optimal_graph.load_graph(learner.mdp_graph)
     optimal_graph.visualize(highlight_states=[learner.start_state, *learner.done_states], use_grid_layout=False, display_state_name=False)

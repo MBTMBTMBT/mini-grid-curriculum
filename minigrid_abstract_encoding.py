@@ -177,9 +177,9 @@ if __name__ == '__main__':
     LR = 1e-4
 
     # train configs
-    EPOCHS = int(1e4)
-    RESAMPLE_FREQ = int(1e2)
-    RESET_TIMES = 100
+    EPOCHS = int(1e5)
+    RESAMPLE_FREQ = int(1e3)
+    RESET_TIMES = 25
     SAVE_FREQ = 20
 
     session_name = "experiments/learn_feature_bin"
@@ -215,7 +215,7 @@ if __name__ == '__main__':
 
     progress_bar = tqdm(range(epoch_counter, EPOCHS), desc=f'Training Epoch {epoch_counter}')
     for i, batch in enumerate(progress_bar):
-        if epoch_counter % RESAMPLE_FREQ == 0:
+        if epoch_counter % RESAMPLE_FREQ == 0 or len(state_action_state_to_reward_dict) == 0:
             state_action_state_to_reward_dict = {}
             done_state_action_state_set = set()
 

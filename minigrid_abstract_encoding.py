@@ -177,9 +177,9 @@ if __name__ == '__main__':
     LR = 1e-4
 
     # train configs
-    EPOCHS = int(1e6)
-    RESAMPLE_FREQ = int(1e3)
-    RESET_TIMES = 10
+    EPOCHS = int(1e4)
+    RESAMPLE_FREQ = int(1e2)
+    RESET_TIMES = 100
     SAVE_FREQ = 20
 
     session_name = "experiments/learn_feature_bin"

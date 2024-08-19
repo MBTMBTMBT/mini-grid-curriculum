@@ -71,7 +71,9 @@ def train_epoch(
                 rewards = torch.cat((rewards, rewards_), 0)
                 is_terminated = torch.cat((is_terminated, is_terminated_), 0)
 
-        num_keep_dim = randint(1, model.n_latent_dims)
+        weights = np.arange(1, model.n_latent_dims + 1)
+        weights = weights / weights.sum()
+        num_keep_dim = np.random.choice(np.arange(1, model.n_latent_dims + 1), p=weights)
         losses = model.run_batch(obs_vec0, actions, obs_vec1, rewards, is_terminated, num_keep_dim, train=True)
         loss, rec_loss, inv_loss, ratio_loss, reward_loss, terminate_loss, neighbour_loss = losses
         if step_counter <= 0:
@@ -169,11 +171,11 @@ if __name__ == '__main__':
     # model configs
     NUM_ACTIONS = int(train_list_envs[0].env.action_space.n)
     OBS_SPACE = int(train_list_envs[0].total_features)
-    LATENT_DIMS = 16
+    LATENT_DIMS = 32
 
     # train hyperparams
     WEIGHTS = {'inv': 0.3, 'dis': 0.3, 'neighbour': 0.3, 'dec': 0.0001, 'rwd': 0.05, 'terminate': 0.05}
-    BATCH_SIZE = 64
+    BATCH_SIZE = 32
     LR = 1e-4
 
     # train configs

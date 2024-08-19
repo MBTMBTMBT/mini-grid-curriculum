@@ -26,7 +26,7 @@ class OneHotEncodingMDPLearner:
         self.mdp_graph: MDPGraph = MDPGraph()
 
         self.state_action_state_to_reward_dict = {}
-        self.done_state_action_state = set()
+        self.done_state_action_state_set = set()
 
     def learn(self):
         obs, _ = self.env.reset()
@@ -53,7 +53,7 @@ class OneHotEncodingMDPLearner:
 
                         if done:
                             self.done_states.add(next_state_code)
-                            self.done_state_action_state.add(current_state_action_state_code)
+                            self.done_state_action_state_set.add(current_state_action_state_code)
 
                         if current_state_action_code not in self.state_action_set:
                             new_state_action_set.add(current_state_action_code)

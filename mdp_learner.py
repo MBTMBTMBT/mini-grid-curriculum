@@ -28,7 +28,7 @@ class OneHotEncodingMDPLearner:
         self.state_action_state_to_reward_dict = {}
         self.done_state_action_state_set = set()
 
-    def learn(self):
+    def learn(self, verbose=0):
         obs, _ = self.env.reset()
         current_state_code = numpy_binary_array_to_string(obs)
         self.state_set.add(current_state_code)
@@ -61,7 +61,8 @@ class OneHotEncodingMDPLearner:
                             new_state_set.add(next_state_code)
 
                         state_action_count += 1
-                        print(f"Added [state-action pair num: {state_action_count}]: {hash(current_state_action_code)} -- {action} -> {hash(next_state_code)} Reward: {reward}")
+                        if verbose >= 1:
+                            print(f"Added [state-action pair num: {state_action_count}]: {hash(current_state_action_code)} -- {action} -> {hash(next_state_code)} Reward: {reward}")
                         self.mdp_graph.add_transition(current_state_code, action, next_state_code, 1.0)
                         self.mdp_graph.add_reward(current_state_code, action, next_state_code, float(reward))
             for new_state_code in new_state_set:

@@ -177,8 +177,8 @@ if __name__ == '__main__':
     LR = 1e-4
 
     # train configs
-    EPOCHS = 1000
-    RESAMPLE_FREQ = 10
+    EPOCHS = int(1e6)
+    RESAMPLE_FREQ = int(1e3)
     RESET_TIMES = 10
     SAVE_FREQ = 20
 
@@ -219,6 +219,7 @@ if __name__ == '__main__':
             state_action_state_to_reward_dict = {}
             done_state_action_state_set = set()
 
+            tqdm.write("Sampling the environments...")
             for _ in range(RESET_TIMES):
                 for env in train_list_envs:
                     learner = OneHotEncodingMDPLearner(env)
@@ -226,8 +227,8 @@ if __name__ == '__main__':
                     state_action_state_to_reward_dict.update(learner.state_action_state_to_reward_dict)
                     done_state_action_state_set.update(learner.done_state_action_state_set)
 
-            print(f"Number of transition pairs: {len(state_action_state_to_reward_dict)}")
-            print(f"Number of terminals: {len(done_state_action_state_set)}")
+            tqdm.write(f"Number of transition pairs: {len(state_action_state_to_reward_dict)}")
+            tqdm.write(f"Number of terminals: {len(done_state_action_state_set)}")
 
             dataset = OneHotDataset(state_action_state_to_reward_dict, done_state_action_state_set)
 

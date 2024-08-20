@@ -76,9 +76,9 @@ def train_epoch(
                 rewards = torch.cat((rewards, rewards_), 0)
                 is_terminated = torch.cat((is_terminated, is_terminated_), 0)
 
-        weights = np.arange(1, model.n_latent_dims + 1)
-        weights = weights / weights.sum()
-        num_keep_dim = np.random.choice(np.arange(1, model.n_latent_dims + 1), p=weights)
+        # weights = np.arange(4, model.n_latent_dims + 1)
+        # weights = weights / weights.sum()
+        num_keep_dim = np.random.choice(np.arange(4, model.n_latent_dims + 1))  #, p=weights)
         losses = model.run_batch(obs_vec0, actions, obs_vec1, rewards, is_terminated, num_keep_dim, train=True)
         loss, rec_loss, inv_loss, ratio_loss, reward_loss, terminate_loss, neighbour_loss = losses
         if step_counter <= 0:
@@ -263,7 +263,7 @@ if __name__ == '__main__':
     # model configs
     NUM_ACTIONS = int(train_list_envs[0].env.action_space.n)
     OBS_SPACE = int(train_list_envs[0].total_features)
-    LATENT_DIMS = 32
+    LATENT_DIMS = 16
 
     # train hyperparams
     WEIGHTS = {'inv': 0.5, 'dis': 0.2, 'neighbour': 0.2, 'dec': 0.0001, 'rwd': 0.05, 'terminate': 0.05}
@@ -271,7 +271,7 @@ if __name__ == '__main__':
     LR = 1e-3
 
     # train configs
-    EPOCHS = int(2e4)
+    EPOCHS = int(1e4)
     RESAMPLE_FREQ = int(1e3)
     RESET_TIMES = 25
     SAVE_FREQ = int(1e3)

@@ -3,6 +3,7 @@ from typing import Union, List
 import statistics
 
 import numpy as np
+import torch
 from stable_baselines3 import PPO
 from stable_baselines3.common.base_class import BaseAlgorithm
 from stable_baselines3.common.callbacks import EventCallback
@@ -12,8 +13,10 @@ from stable_baselines3.common.type_aliases import PolicyPredictor
 from stable_baselines3.common.vec_env import VecEnv
 from torch.utils.tensorboard import SummaryWriter
 
+from binary_state_representation.binary2binaryautoencoder import Binary2BinaryEncoder
 from mdp_graph.mdp_graph import PolicyGraph
 from mdp_learner import OneHotEncodingMDPLearner
+from minigrid_abstract_encoding import EncodingMDPLearner
 from model_sampler import sample_model_with_onehot_encoding
 
 
@@ -179,6 +182,8 @@ class InfoEvalSaveCallback(EvalSaveCallback):
             iter_gamma: float = 0.999,
             iter_threshold: float = 1e-5,
             max_iter: int = 1e5,
+            encoder: Binary2BinaryEncoder or None = None,
+            keep_dims: int = -1
     ):
         super(InfoEvalSaveCallback, self).__init__(
             eval_envs=eval_envs,
@@ -192,6 +197,9 @@ class InfoEvalSaveCallback(EvalSaveCallback):
             verbose=verbose,
             start_timestep=start_timestep,
         )
+
+        self.encoder = encoder
+        self.keep_dims = keep_dims
 
         self.model = model
         self.compute_info_freq = compute_info_freq
@@ -207,6 +215,8 @@ class InfoEvalSaveCallback(EvalSaveCallback):
         for env, env_name in zip(eval_envs, eval_env_names):
             print("Observing environment {}...".format(env_name))
             mdp_learner = OneHotEncodingMDPLearner(env.venv.envs[0])
+            if self.encoder is not None and self.keep_dims > 0:
+                mdp_learner = EncodingMDPLearner(env.venv.envs[0].get_super(), encoder=encoder, device=torch.device("cpu"), keep_dims=keep_dims)
             mdp_learner.learn()
             self.mdp_learners[env_name] = mdp_learner
             # self.prior_model = prior_model
@@ -214,7 +224,7 @@ class InfoEvalSaveCallback(EvalSaveCallback):
             policy_graph.load_graph(mdp_learner.mdp_graph)
             sample_model_with_onehot_encoding(
                 self.model,
-                mdp_learner.state_set,
+                mdp_learner.encoded_state_set if self.encoder is not None and self.keep_dims > 0 else mdp_learner.state_set,
                 mdp_learner.possible_actions,
                 policy_graph,
                 sample_as_prior=True,

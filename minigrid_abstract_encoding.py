@@ -91,16 +91,26 @@ def train_epoch(
 
 
 class EncodingWrapper(FullyObsSB3MLPWrapper):
-    def __init__(self, env: CustomEnv, encoder: Binary2BinaryEncoder, device: torch.device):
+    def __init__(self, env: CustomEnv, encoder: Binary2BinaryEncoder, device: torch.device, keep_dims: int or None = None, ):
         super().__init__(env)
         self.env = env
-        self.observation_space = spaces.Box(
-            low=0,
-            high=1,
-            shape=(encoder.num_output_dims,),
-            dtype=np.float32,
-        )
-        self.total_features = encoder.num_output_dims
+        self.keep_dims = keep_dims
+        if keep_dims is None:
+            self.observation_space = spaces.Box(
+                low=0,
+                high=1,
+                shape=(encoder.num_output_dims,),
+                dtype=np.float32,
+            )
+            self.total_features = encoder.num_output_dims
+        else:
+            self.observation_space = spaces.Box(
+                low=0,
+                high=1,
+                shape=(self.keep_dims,),
+                dtype=np.float32,
+            )
+            self.total_features = self.keep_dims
         self.encoder = encoder.to(device)
         self.device = device
 
@@ -110,6 +120,8 @@ class EncodingWrapper(FullyObsSB3MLPWrapper):
         self.encoder.to(self.device)
         obs = self.encoder(obs)
         obs = obs.squeeze(0).detach().cpu().numpy()
+        if self.keep_dims is not None:
+            obs = obs[0:self.keep_dims]
         return obs
 
     def get_super(self):
@@ -271,7 +283,7 @@ if __name__ == '__main__':
     # model configs
     NUM_ACTIONS = int(train_list_envs[0].env.action_space.n)
     OBS_SPACE = int(train_list_envs[0].total_features)
-    LATENT_DIMS = 16
+    LATENT_DIMS = 32
 
     # train hyperparams
     WEIGHTS = {'inv': 0.35, 'dis': 0.35, 'neighbour': 0.1, 'dec': 0.05, 'rwd': 0.05, 'terminate': 0.05}
@@ -284,7 +296,7 @@ if __name__ == '__main__':
     RESET_TIMES = 25
     SAVE_FREQ = int(1e3)
 
-    session_name = "experiments/learn_feature_corridor"
+    session_name = "experiments/learn_feature_corridor_32"
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model = Binary2BinaryFeatureNet(NUM_ACTIONS, OBS_SPACE, n_latent_dims=LATENT_DIMS, lr=LR, weights=WEIGHTS, device=device,).to(device)

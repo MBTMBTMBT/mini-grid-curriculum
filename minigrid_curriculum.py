@@ -1,15 +1,18 @@
 import os
 from typing import Dict, List
 
+import torch
 from stable_baselines3 import PPO
 from torch.utils.tensorboard import SummaryWriter
 
+from binary_state_representation.binary2binaryautoencoder import Binary2BinaryEncoder, Binary2BinaryFeatureNet
 from callbacks import EvalCallback, EvalSaveCallback, InfoEvalSaveCallback
 from customize_minigrid.custom_env import CustomEnv
 from stable_baselines3.common.vec_env import DummyVecEnv, VecMonitor
 from stable_baselines3.common.callbacks import CallbackList
 
 from customize_minigrid.wrappers import FullyObsSB3MLPWrapper
+from minigrid_abstract_encoding import EncodingWrapper
 
 
 class TaskConfig:
@@ -82,6 +85,8 @@ class CurriculumRunner:
             iter_gamma: float = 0.999,
             iter_threshold: float = 1e-5,
             max_iter: int = 1e5,
+            encoder: Binary2BinaryEncoder or None = None,
+            keep_dims: int = -1
     ):
         """
         Trainer function for mini-grid curriculum
@@ -131,6 +136,9 @@ class CurriculumRunner:
                         max_steps=each_task_config.eval_max_steps,
                     )
                 )
+                if encoder is not None:
+                    train_env = EncodingWrapper(train_env.env, encoder, device=torch.device("cpu"))
+                    eval_env = EncodingWrapper(eval_env.env, encoder, device=torch.device("cpu"))
                 train_envs.append(train_env)
                 train_env_steps.append(each_task_config.train_total_steps)
                 train_env_names.append(each_task_config.name)
@@ -148,15 +156,19 @@ class CurriculumRunner:
                 train_env_step_list.append(sum(train_env_steps))
                 # train_env_name_list.append(train_env_names)
         for each_target_config in self.target_configs:
-            target_env = CustomEnv(
-                txt_file_path=each_target_config.txt_file_path,
-                display_size=self.max_minimum_display_size,
-                display_mode=each_target_config.display_mode,
-                random_rotate=each_target_config.random_rotate,
-                random_flip=each_target_config.random_flip,
-                custom_mission=each_target_config.custom_mission,
-                max_steps=each_target_config.max_steps,
+            target_env = FullyObsSB3MLPWrapper(
+                CustomEnv(
+                    txt_file_path=each_target_config.txt_file_path,
+                    display_size=self.max_minimum_display_size,
+                    display_mode=each_target_config.display_mode,
+                    random_rotate=each_target_config.random_rotate,
+                    random_flip=each_target_config.random_flip,
+                    custom_mission=each_target_config.custom_mission,
+                    max_steps=each_target_config.max_steps,
+                )
             )
+            if encoder is not None:
+                target_env = EncodingWrapper(target_env.env, encoder, device=torch.device("cpu"))
             target_env_list.append(VecMonitor(DummyVecEnv([lambda: target_env])))
             target_env_name_list.append(each_target_config.name)
 
@@ -207,6 +219,8 @@ class CurriculumRunner:
                 iter_gamma=iter_gamma,
                 iter_threshold=iter_threshold,
                 max_iter=max_iter,
+                encoder=encoder,
+                keep_dims=keep_dims,
             )
 
             # callback_list = CallbackList(callbacks=[target_callback, eval_callback])
@@ -329,9 +343,24 @@ if __name__ == '__main__':
 
     target_configs = []
 
+    # ========= This section need to be optimized =========
+    NUM_ACTIONS = 7
+    OBS_SPACE = 2575
+    LATENT_DIMS = 16
+    LR = 0.0
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    WEIGHTS = {'inv': 0.3, 'dis': 0.3, 'neighbour': 0.3, 'dec': 0.0001, 'rwd': 0.05, 'terminate': 0.05}
+
+    model = Binary2BinaryFeatureNet(NUM_ACTIONS, OBS_SPACE, n_latent_dims=LATENT_DIMS, lr=LR, weights=WEIGHTS,
+                                    device=device, )
+    model.load(r'experiments/learn_feature_corridor/model_epoch_19000.pth')
+    encoder = model.encoder.to(device)
+    # =====================================================
+
+    # encoder = None  # test non encoding case
     runner = CurriculumRunner(task_configs, target_configs)
     runner.train(
-        session_dir="./experiments/curriculum_example",
+        session_dir="./experiments/corridor_encode_16",
         eval_freq=int(5e3),
         compute_info_freq=int(5e3),
         num_eval_episodes=50,
@@ -341,4 +370,6 @@ if __name__ == '__main__':
         iter_gamma=0.999,
         iter_threshold=1e-5,
         max_iter=int(1e5),
+        encoder=encoder,
+        keep_dims=16,
     )

@@ -255,14 +255,14 @@ class InfoEvalSaveCallback(EvalSaveCallback):
         for env, env_name in zip(self.eval_envs, self.eval_env_names):
             sample_model_with_onehot_encoding(
                 self.model,
-                self.mdp_learners[env_name].state_set,
+                self.mdp_learners[env_name].encoded_state_set if self.encoder is not None and self.keep_dims > 0 else self.mdp_learners[env_name].state_set,
                 self.mdp_learners[env_name].possible_actions,
                 self.policy_graphs_agent_prior[env_name],
                 sample_as_prior=False,
             )
             sample_model_with_onehot_encoding(
                 self.model,
-                self.mdp_learners[env_name].state_set,
+                self.mdp_learners[env_name].encoded_state_set if self.encoder is not None and self.keep_dims > 0 else self.mdp_learners[env_name].state_set,
                 self.mdp_learners[env_name].possible_actions,
                 self.policy_graphs_uniform_prior[env_name],
                 sample_as_prior=False,

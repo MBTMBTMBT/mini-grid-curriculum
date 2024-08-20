@@ -1,12 +1,17 @@
 from random import randint, choice
 from typing import Dict, Set
 
+import numpy as np
 import torch
+from gymnasium import spaces
 from torch.utils.data import Dataset, DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
-from binary_state_representation.binary2binaryautoencoder import Binary2BinaryFeatureNet
-from mdp_learner import string_to_numpy_binary_array, OneHotEncodingMDPLearner
+from binary_state_representation.binary2binaryautoencoder import Binary2BinaryFeatureNet, Binary2BinaryEncoder
+from mdp_learner import string_to_numpy_binary_array, OneHotEncodingMDPLearner, numpy_binary_array_to_string
+
+from customize_minigrid.wrappers import FullyObsSB3MLPWrapper
+from customize_minigrid.custom_env import CustomEnv
 
 
 class OneHotDataset(Dataset):
@@ -85,16 +90,103 @@ def train_epoch(
         return loss, step_counter
 
 
+class EncodingWrapper(FullyObsSB3MLPWrapper):
+    def __init__(self, env: CustomEnv, encoder: Binary2BinaryEncoder, device: torch.device):
+        super().__init__(env)
+        self.observation_space = spaces.Box(
+            low=0,
+            high=1,
+            shape=(encoder.num_output_dims,),
+            dtype=np.float32,
+        )
+        self.total_features = encoder.num_output_dims
+        self.encoder = encoder.to(device)
+        self.device = device
+
+    def observation(self, obs):
+        obs = super().observation(obs)
+        obs = torch.tensor(obs, dtype=torch.float32, device=self.device).unsqueeze(0)
+        obs = self.encoder(obs)
+        obs = obs.squeeze(0).detach().cpu().numpy()
+        return obs
+
+
+class EncodingMDPLearner(OneHotEncodingMDPLearner):
+    def __init__(self, env: FullyObsSB3MLPWrapper, encoder: Binary2BinaryEncoder, device: torch.device, keep_dim: int or None = None):
+        super().__init__(env)
+        self.encoder = encoder
+        self.device = device
+
+        self.encoded_start_state = None
+        self.encoded_done_states = set()
+        self.keep_dim = keep_dim if keep_dim is not None else encoder.num_output_dims
+
+    def encode(self, obs: np.ndarray) -> np.ndarray:
+        obs = torch.tensor(obs, dtype=torch.float32, device=self.device).unsqueeze(0)
+        obs = self.encoder(obs)
+        obs = obs.squeeze(0).detach().cpu().numpy()
+        return obs
+
+    def encode_str(self, obs: str) -> str:
+        return numpy_binary_array_to_string(self.encode(string_to_numpy_binary_array(obs)))
+
+    def learn(self, verbose=0):
+        obs, _ = self.env.reset()
+        current_state_code = numpy_binary_array_to_string(obs)
+        self.state_set.add(current_state_code)
+        self.start_state = current_state_code
+        self.encoded_start_state = self.encode_str(current_state_code)[0:self.keep_dim]
+        state_action_count = 0
+        while True:
+            new_state_set = set()
+            new_state_action_set = set()
+            for current_state_code in self.state_set:
+                current_state_obs = string_to_numpy_binary_array(current_state_code)
+                if current_state_code in self.done_states:
+                    continue
+                for action in self.possible_actions:
+                    current_state_action_code = str(current_state_code) + "-" + str(action)
+                    if current_state_action_code not in self.state_action_set:
+                        self.env.set_env_with_code(current_state_obs)
+                        next_obs, reward, done, truncated, info = self.env.step(action)
+                        next_state_code = numpy_binary_array_to_string(next_obs)
+
+                        current_state_action_state_code = str(current_state_code) + "-" + str(action) + "-" + str(next_state_code)
+                        self.state_action_state_to_reward_dict[current_state_action_state_code] = reward
+
+                        if done:
+                            self.done_states.add(next_state_code)
+                            self.encoded_done_states.add(self.encode_str(next_state_code)[0:self.keep_dim])
+                            self.done_state_action_state_set.add(current_state_action_state_code)
+
+                        if current_state_action_code not in self.state_action_set:
+                            new_state_action_set.add(current_state_action_code)
+                        if next_state_code not in self.state_set:
+                            new_state_set.add(next_state_code)
+
+                        state_action_count += 1
+                        if verbose >= 1:
+                            print(f"Added [state-action pair num: {state_action_count}]: {hash(current_state_action_code)} -- {action} -> {hash(next_state_code)} Reward: {reward}")
+
+                        self.mdp_graph.add_transition(self.encode_str(current_state_code)[0:self.keep_dim], action, self.encode_str(next_state_code)[0:self.keep_dim], 1.0)
+                        self.mdp_graph.add_reward(self.encode_str(current_state_code)[0:self.keep_dim], action, self.encode_str(next_state_code)[0:self.keep_dim], float(reward))
+            for new_state_code in new_state_set:
+                self.state_set.add(new_state_code)
+            for new_state_action_code in new_state_action_set:
+                self.state_action_set.add(new_state_action_code)
+            if len(new_state_set) == 0 and len(new_state_action_set) == 0:
+                break
+
+        self.env.force_reset()
+
+
 if __name__ == '__main__':
-    import numpy as np
     from matplotlib import pyplot as plt
     from torch.utils.data import DataLoader
     from tqdm import tqdm
     import math
 
     import torch
-    from customize_minigrid.custom_env import CustomEnv
-    from customize_minigrid.wrappers import FullyObsSB3MLPWrapper
 
     train_list_envs = [
         FullyObsSB3MLPWrapper(
@@ -174,15 +266,15 @@ if __name__ == '__main__':
     LATENT_DIMS = 32
 
     # train hyperparams
-    WEIGHTS = {'inv': 0.3, 'dis': 0.3, 'neighbour': 0.3, 'dec': 0.0001, 'rwd': 0.05, 'terminate': 0.05}
+    WEIGHTS = {'inv': 0.5, 'dis': 0.2, 'neighbour': 0.2, 'dec': 0.0001, 'rwd': 0.05, 'terminate': 0.05}
     BATCH_SIZE = 32
-    LR = 1e-4
+    LR = 1e-3
 
     # train configs
-    EPOCHS = int(1e5)
+    EPOCHS = int(2e4)
     RESAMPLE_FREQ = int(1e3)
     RESET_TIMES = 25
-    SAVE_FREQ = 20
+    SAVE_FREQ = int(1e3)
 
     session_name = "experiments/learn_feature_bin"
 

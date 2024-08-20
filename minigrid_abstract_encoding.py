@@ -266,9 +266,9 @@ if __name__ == '__main__':
     LATENT_DIMS = 16
 
     # train hyperparams
-    WEIGHTS = {'inv': 0.5, 'dis': 0.2, 'neighbour': 0.2, 'dec': 0.0001, 'rwd': 0.05, 'terminate': 0.05}
+    WEIGHTS = {'inv': 0.35, 'dis': 0.35, 'neighbour': 0.2, 'dec': 0.05, 'rwd': 0.05, 'terminate': 0.05}
     BATCH_SIZE = 32
-    LR = 1e-3
+    LR = 1e-4
 
     # train configs
     EPOCHS = int(1e4)

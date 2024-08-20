@@ -2,6 +2,7 @@ from typing import Set, Hashable, List
 import torch
 from stable_baselines3.common.base_class import BaseAlgorithm
 
+from binary_state_representation.binary2binaryautoencoder import Binary2BinaryEncoder
 from mdp_graph.mdp_graph import PolicyGraph
 from mdp_learner import string_to_numpy_binary_array
 
@@ -12,15 +13,21 @@ def sample_model_with_onehot_encoding(
         actions: List[Hashable],
         policy_graph: PolicyGraph,
         sample_as_prior: bool = False,
+        encoder: Binary2BinaryEncoder or None = None,
+        keep_dims: int = -1,
+        #  device: torch.device = torch.device('cpu'),
 ):
     """
     No need to use env cause states are observations, if ever use image obs in the future env will be needed.
     """
-    device = next(model.policy.parameters()).device
+    device = model.device
     with torch.no_grad():
         for state in states:
             obs_tensor = string_to_numpy_binary_array(state)
             obs_tensor = torch.tensor(obs_tensor, dtype=torch.float32, device=device).unsqueeze(0)
+            if encoder:
+                encoder.to(device)
+                obs_tensor = encoder(obs_tensor)[:, 0:keep_dims]
             _, action_logits, _ = model.policy.evaluate_actions(obs_tensor, torch.tensor([actions], device=device))
             action_probs = torch.nn.functional.softmax(action_logits, dim=-1).cpu().squeeze().numpy().tolist()
             for action, action_prob in zip(actions, action_probs):

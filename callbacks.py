@@ -183,7 +183,7 @@ class InfoEvalSaveCallback(EvalSaveCallback):
             iter_threshold: float = 1e-5,
             max_iter: int = 1e5,
             encoder: Binary2BinaryEncoder or None = None,
-            keep_dims: int = -1
+            keep_dims: int = -1,
     ):
         super(InfoEvalSaveCallback, self).__init__(
             eval_envs=eval_envs,
@@ -200,6 +200,7 @@ class InfoEvalSaveCallback(EvalSaveCallback):
 
         self.encoder = encoder
         self.keep_dims = keep_dims
+        self.using_encoder = self.encoder is not None
 
         self.model = model
         self.compute_info_freq = compute_info_freq
@@ -215,8 +216,10 @@ class InfoEvalSaveCallback(EvalSaveCallback):
         for env, env_name in zip(eval_envs, eval_env_names):
             print("Observing environment {}...".format(env_name))
             mdp_learner = OneHotEncodingMDPLearner(env.venv.envs[0])
-            if self.encoder is not None and self.keep_dims > 0:
-                mdp_learner = EncodingMDPLearner(env.venv.envs[0].get_super(), encoder=encoder, device=torch.device("cpu"), keep_dims=keep_dims)
+            if self.using_encoder:
+                mdp_learner = OneHotEncodingMDPLearner(env.venv.envs[0].get_super())
+            # if self.encoder is not None and self.keep_dims > 0:
+            #     mdp_learner = EncodingMDPLearner(env.venv.envs[0].get_super(), encoder=encoder, device=torch.device("cpu"), keep_dims=keep_dims)
             mdp_learner.learn()
             self.mdp_learners[env_name] = mdp_learner
             # self.prior_model = prior_model
@@ -224,10 +227,12 @@ class InfoEvalSaveCallback(EvalSaveCallback):
             policy_graph.load_graph(mdp_learner.mdp_graph)
             sample_model_with_onehot_encoding(
                 self.model,
-                mdp_learner.encoded_state_set if self.encoder is not None and self.keep_dims > 0 else mdp_learner.state_set,
+                mdp_learner.state_set,  # mdp_learner.encoded_state_set if self.encoder is not None and self.keep_dims > 0 else mdp_learner.state_set,
                 mdp_learner.possible_actions,
                 policy_graph,
                 sample_as_prior=True,
+                encoder=encoder,
+                keep_dims=keep_dims,
             )
             self.policy_graphs_agent_prior[env_name] = policy_graph
 
@@ -255,17 +260,21 @@ class InfoEvalSaveCallback(EvalSaveCallback):
         for env, env_name in zip(self.eval_envs, self.eval_env_names):
             sample_model_with_onehot_encoding(
                 self.model,
-                self.mdp_learners[env_name].encoded_state_set if self.encoder is not None and self.keep_dims > 0 else self.mdp_learners[env_name].state_set,
+                self.mdp_learners[env_name].state_set,  # self.mdp_learners[env_name].encoded_state_set if self.encoder is not None and self.keep_dims > 0 else self.mdp_learners[env_name].state_set,
                 self.mdp_learners[env_name].possible_actions,
                 self.policy_graphs_agent_prior[env_name],
                 sample_as_prior=False,
+                encoder=self.encoder,
+                keep_dims=self.keep_dims,
             )
             sample_model_with_onehot_encoding(
                 self.model,
-                self.mdp_learners[env_name].encoded_state_set if self.encoder is not None and self.keep_dims > 0 else self.mdp_learners[env_name].state_set,
+                self.mdp_learners[env_name].state_set,  # self.mdp_learners[env_name].encoded_state_set if self.encoder is not None and self.keep_dims > 0 else self.mdp_learners[env_name].state_set,
                 self.mdp_learners[env_name].possible_actions,
                 self.policy_graphs_uniform_prior[env_name],
                 sample_as_prior=False,
+                encoder=self.encoder,
+                keep_dims=self.keep_dims,
             )
 
             self.policy_graphs_agent_prior[env_name].value_iteration(

@@ -107,6 +107,7 @@ class EncodingWrapper(FullyObsSB3MLPWrapper):
     def observation(self, obs):
         obs = super().observation(obs)
         obs = torch.tensor(obs, dtype=torch.float32, device=self.device).unsqueeze(0)
+        self.encoder.to(self.device)
         obs = self.encoder(obs)
         obs = obs.squeeze(0).detach().cpu().numpy()
         return obs

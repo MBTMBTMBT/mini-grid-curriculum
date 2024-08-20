@@ -248,7 +248,7 @@ if __name__ == '__main__':
     config.train_random_rotate = True
     config.train_random_flip = True
     config.train_max_steps = 500
-    config.train_total_steps = 2e5
+    config.train_total_steps = 5e4
     config.eval_display_mode = "middle"
     config.eval_random_rotate = False
     config.eval_random_flip = False
@@ -265,7 +265,7 @@ if __name__ == '__main__':
     config.train_random_rotate = True
     config.train_random_flip = True
     config.train_max_steps = 500
-    config.train_total_steps = 2e5
+    config.train_total_steps = 5e4
     config.eval_display_mode = "middle"
     config.eval_random_rotate = False
     config.eval_random_flip = False
@@ -282,7 +282,7 @@ if __name__ == '__main__':
     config.train_random_rotate = True
     config.train_random_flip = True
     config.train_max_steps = 500
-    config.train_total_steps = 2e5
+    config.train_total_steps = 5e4
     config.eval_display_mode = "middle"
     config.eval_random_rotate = False
     config.eval_random_flip = False
@@ -386,4 +386,18 @@ if __name__ == '__main__':
         max_iter=int(1e5),
         encoder=encoder,
         keep_dims=10,
+    )
+    runner.train(
+        session_dir="./experiments/corridor_not_encoded",
+        eval_freq=int(5e3),
+        compute_info_freq=int(5e3),
+        num_eval_episodes=50,
+        eval_deterministic=False,
+        force_sequential=True,
+        start_time_step=0,
+        iter_gamma=0.999,
+        iter_threshold=1e-5,
+        max_iter=int(1e5),
+        encoder=None,
+        keep_dims=-1,
     )

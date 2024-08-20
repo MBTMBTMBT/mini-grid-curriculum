@@ -93,6 +93,7 @@ def train_epoch(
 class EncodingWrapper(FullyObsSB3MLPWrapper):
     def __init__(self, env: CustomEnv, encoder: Binary2BinaryEncoder, device: torch.device):
         super().__init__(env)
+        self.env = env
         self.observation_space = spaces.Box(
             low=0,
             high=1,
@@ -110,16 +111,21 @@ class EncodingWrapper(FullyObsSB3MLPWrapper):
         obs = obs.squeeze(0).detach().cpu().numpy()
         return obs
 
+    def get_super(self):
+        return FullyObsSB3MLPWrapper(self.env)
+
 
 class EncodingMDPLearner(OneHotEncodingMDPLearner):
-    def __init__(self, env: FullyObsSB3MLPWrapper, encoder: Binary2BinaryEncoder, device: torch.device, keep_dim: int or None = None):
+    def __init__(self, env: FullyObsSB3MLPWrapper, encoder: Binary2BinaryEncoder, device: torch.device, keep_dims: int or None = None):
         super().__init__(env)
         self.encoder = encoder
         self.device = device
 
         self.encoded_start_state = None
         self.encoded_done_states = set()
-        self.keep_dim = keep_dim if keep_dim is not None else encoder.num_output_dims
+        self.encoded_state_set = set()
+
+        self.keep_dims = keep_dims if keep_dims is not None else encoder.num_output_dims
 
     def encode(self, obs: np.ndarray) -> np.ndarray:
         obs = torch.tensor(obs, dtype=torch.float32, device=self.device).unsqueeze(0)
@@ -135,7 +141,7 @@ class EncodingMDPLearner(OneHotEncodingMDPLearner):
         current_state_code = numpy_binary_array_to_string(obs)
         self.state_set.add(current_state_code)
         self.start_state = current_state_code
-        self.encoded_start_state = self.encode_str(current_state_code)[0:self.keep_dim]
+        self.encoded_start_state = self.encode_str(current_state_code)[0:self.keep_dims]
         state_action_count = 0
         while True:
             new_state_set = set()
@@ -156,7 +162,7 @@ class EncodingMDPLearner(OneHotEncodingMDPLearner):
 
                         if done:
                             self.done_states.add(next_state_code)
-                            self.encoded_done_states.add(self.encode_str(next_state_code)[0:self.keep_dim])
+                            self.encoded_done_states.add(self.encode_str(next_state_code)[0:self.keep_dims])
                             self.done_state_action_state_set.add(current_state_action_state_code)
 
                         if current_state_action_code not in self.state_action_set:
@@ -168,10 +174,11 @@ class EncodingMDPLearner(OneHotEncodingMDPLearner):
                         if verbose >= 1:
                             print(f"Added [state-action pair num: {state_action_count}]: {hash(current_state_action_code)} -- {action} -> {hash(next_state_code)} Reward: {reward}")
 
-                        self.mdp_graph.add_transition(self.encode_str(current_state_code)[0:self.keep_dim], action, self.encode_str(next_state_code)[0:self.keep_dim], 1.0)
-                        self.mdp_graph.add_reward(self.encode_str(current_state_code)[0:self.keep_dim], action, self.encode_str(next_state_code)[0:self.keep_dim], float(reward))
+                        self.mdp_graph.add_transition(self.encode_str(current_state_code)[0:self.keep_dims], action, self.encode_str(next_state_code)[0:self.keep_dims], 1.0)
+                        self.mdp_graph.add_reward(self.encode_str(current_state_code)[0:self.keep_dims], action, self.encode_str(next_state_code)[0:self.keep_dims], float(reward))
             for new_state_code in new_state_set:
                 self.state_set.add(new_state_code)
+                self.encoded_state_set.add(self.encode_str(new_state_code)[0:self.keep_dims])
             for new_state_action_code in new_state_action_set:
                 self.state_action_set.add(new_state_action_code)
             if len(new_state_set) == 0 and len(new_state_action_set) == 0:
@@ -276,7 +283,7 @@ if __name__ == '__main__':
     RESET_TIMES = 25
     SAVE_FREQ = int(1e3)
 
-    session_name = "experiments/learn_feature_bin"
+    session_name = "experiments/learn_feature_corridor"
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model = Binary2BinaryFeatureNet(NUM_ACTIONS, OBS_SPACE, n_latent_dims=LATENT_DIMS, lr=LR, weights=WEIGHTS, device=device,).to(device)

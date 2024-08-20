@@ -373,3 +373,17 @@ if __name__ == '__main__':
         encoder=encoder,
         keep_dims=16,
     )
+    runner.train(
+        session_dir="./experiments/corridor_encode_10",
+        eval_freq=int(5e3),
+        compute_info_freq=int(5e3),
+        num_eval_episodes=50,
+        eval_deterministic=False,
+        force_sequential=True,
+        start_time_step=0,
+        iter_gamma=0.999,
+        iter_threshold=1e-5,
+        max_iter=int(1e5),
+        encoder=encoder,
+        keep_dims=10,
+    )

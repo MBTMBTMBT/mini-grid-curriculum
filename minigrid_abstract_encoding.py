@@ -78,7 +78,7 @@ def train_epoch(
 
         # weights = np.arange(4, model.n_latent_dims + 1)
         # weights = weights / weights.sum()
-        num_keep_dim = np.random.choice(np.arange(4, model.n_latent_dims + 1))  #, p=weights)
+        num_keep_dim = np.random.choice(np.arange(1, model.n_latent_dims + 1))  #, p=weights)
         losses = model.run_batch(obs_vec0, actions, obs_vec1, rewards, is_terminated, num_keep_dim, train=True)
         loss, rec_loss, inv_loss, ratio_loss, reward_loss, terminate_loss, neighbour_loss = losses
         if step_counter <= 0:
@@ -266,12 +266,12 @@ if __name__ == '__main__':
     LATENT_DIMS = 16
 
     # train hyperparams
-    WEIGHTS = {'inv': 0.35, 'dis': 0.35, 'neighbour': 0.2, 'dec': 0.05, 'rwd': 0.05, 'terminate': 0.05}
+    WEIGHTS = {'inv': 0.35, 'dis': 0.35, 'neighbour': 0.1, 'dec': 0.05, 'rwd': 0.05, 'terminate': 0.05}
     BATCH_SIZE = 32
     LR = 1e-4
 
     # train configs
-    EPOCHS = int(1e4)
+    EPOCHS = int(2e4)
     RESAMPLE_FREQ = int(1e3)
     RESET_TIMES = 25
     SAVE_FREQ = int(1e3)

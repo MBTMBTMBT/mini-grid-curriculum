@@ -48,7 +48,8 @@ def train_epoch(
         batch_size: int,
         model: Binary2BinaryFeatureNet,
         writer: SummaryWriter,
-        step_counter: int
+        step_counter: int,
+        use_all_bits=False,
 ):
     num_terminals = len(dataset.done_state_action_state_set)
     if batch_size >= num_terminals * 10:
@@ -79,6 +80,8 @@ def train_epoch(
         # weights = np.arange(4, model.n_latent_dims + 1)
         # weights = weights / weights.sum()
         num_keep_dim = np.random.choice(np.arange(1, model.n_latent_dims + 1))  #, p=weights)
+        if use_all_bits:
+            num_keep_dim = model.n_latent_dims
         losses = model.run_batch(obs_vec0, actions, obs_vec1, rewards, is_terminated, num_keep_dim, train=True)
         loss, rec_loss, inv_loss, ratio_loss, reward_loss, terminate_loss, neighbour_loss = losses
         if step_counter <= 0:
@@ -296,7 +299,8 @@ if __name__ == '__main__':
     RESET_TIMES = 25
     SAVE_FREQ = int(1e3)
 
-    session_name = "experiments/learn_feature_corridor_32"
+    ALL_BITS = False
+    session_name = "experiments/learn_feature_corridor_32_new_loss"
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model = Binary2BinaryFeatureNet(NUM_ACTIONS, OBS_SPACE, n_latent_dims=LATENT_DIMS, lr=LR, weights=WEIGHTS, device=device,).to(device)
@@ -348,7 +352,7 @@ if __name__ == '__main__':
 
             dataset = OneHotDataset(state_action_state_to_reward_dict, done_state_action_state_set)
 
-        loss_val, step_counter = train_epoch(dataset, BATCH_SIZE, model, tb_writer, step_counter)
+        loss_val, step_counter = train_epoch(dataset, BATCH_SIZE, model, tb_writer, step_counter, use_all_bits=ALL_BITS)
 
         if epoch_counter % SAVE_FREQ == 0:
             model.save(f"{session_name}/model_epoch_{epoch_counter}.pth", epoch_counter, step_counter, performance)

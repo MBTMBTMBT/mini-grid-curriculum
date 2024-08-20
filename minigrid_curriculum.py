@@ -353,7 +353,7 @@ if __name__ == '__main__':
 
     model = Binary2BinaryFeatureNet(NUM_ACTIONS, OBS_SPACE, n_latent_dims=LATENT_DIMS, lr=LR, weights=WEIGHTS,
                                     device=device, )
-    model.load(r'experiments/learn_feature_corridor/model_epoch_19000.pth')
+    model.load(r'experiments/learn_feature_corridor_16/model_epoch_19000.pth')
     encoder = model.encoder.to(device)
     # =====================================================
 

@@ -137,6 +137,7 @@ class CurriculumRunner:
                     )
                 )
                 if encoder is not None:
+                    encoder.eval()
                     train_env = EncodingWrapper(train_env.env, encoder, device=torch.device("cpu"), keep_dims=keep_dims)
                     eval_env = EncodingWrapper(eval_env.env, encoder, device=torch.device("cpu"), keep_dims=keep_dims)
                 train_envs.append(train_env)
@@ -168,6 +169,7 @@ class CurriculumRunner:
                 )
             )
             if encoder is not None:
+                encoder.eval()
                 target_env = EncodingWrapper(target_env.env, encoder, device=torch.device("cpu"), keep_dims=keep_dims)
             target_env_list.append(VecMonitor(DummyVecEnv([lambda: target_env])))
             target_env_name_list.append(each_target_config.name)

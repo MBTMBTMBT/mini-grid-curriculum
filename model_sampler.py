@@ -27,6 +27,7 @@ def sample_model_with_onehot_encoding(
             obs_tensor = torch.tensor(obs_tensor, dtype=torch.float32, device=device).unsqueeze(0)
             if encoder:
                 encoder.to(device)
+                encoder.eval()
                 obs_tensor = encoder(obs_tensor)[:, 0:keep_dims]
             _, action_logits, _ = model.policy.evaluate_actions(obs_tensor, torch.tensor([actions], device=device))
             action_probs = torch.nn.functional.softmax(action_logits, dim=-1).cpu().squeeze().numpy().tolist()

@@ -118,6 +118,7 @@ class EncodingWrapper(FullyObsSB3MLPWrapper):
             )
             self.total_features = self.keep_dims
         self.encoder = encoder.to(device)
+        self.encoder.eval()
         self.device = device
 
     def observation(self, obs):
@@ -138,6 +139,7 @@ class EncodingMDPLearner(OneHotEncodingMDPLearner):
     def __init__(self, env: FullyObsSB3MLPWrapper, encoder: Binary2BinaryEncoder, device: torch.device, keep_dims: int or None = None):
         super().__init__(env)
         self.encoder = encoder
+        self.encoder.eval()
         self.device = device
 
         self.encoded_start_state = None
@@ -159,6 +161,7 @@ class EncodingMDPLearner(OneHotEncodingMDPLearner):
         return numpy_binary_array_to_string(self.encode(string_to_numpy_binary_array(obs)))
 
     def learn(self, verbose=0):
+        self.encoder.eval()
         obs, _ = self.env.reset()
         current_state_code = numpy_binary_array_to_string(obs)
         self.state_set.add(current_state_code)
@@ -300,16 +303,16 @@ if __name__ == '__main__':
     LATENT_DIMS = 16
 
     # train hyperparams
-    WEIGHTS = {'inv': 1.0, 'dis': 1.0, 'neighbour': 1.0, 'dec': 1.0, 'rwd': 1.0, 'terminate': 1.0}
-    BATCH_SIZE = 8
-    LR = 5e-4
+    WEIGHTS = {'inv': 0.35, 'dis': 0.35, 'neighbour': 0.05, 'dec': 0.05, 'rwd': 0.05, 'terminate': 0.15}
+    BATCH_SIZE = 16
+    LR = 1e-4
 
     # train configs
-    EPOCHS = int(2.5e2)
+    EPOCHS = int(1e3)
     RESAMPLE_FREQ = int(1e1)
     RESET_TIMES = 10
     SAVE_FREQ = int(1e2)
-    IN_EPOCH_REPLAY = int(5e1)
+    IN_EPOCH_REPLAY = int(1e2)
 
     ALL_BITS = False
     session_name = "experiments/learn_feature_corridor_16"

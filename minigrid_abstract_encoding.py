@@ -302,14 +302,14 @@ if __name__ == '__main__':
     # train hyperparams
     WEIGHTS = {'inv': 1.0, 'dis': 1.0, 'neighbour': 1.0, 'dec': 1.0, 'rwd': 1.0, 'terminate': 1.0}
     BATCH_SIZE = 8
-    LR = 1e-4
+    LR = 5e-4
 
     # train configs
     EPOCHS = int(2.5e2)
     RESAMPLE_FREQ = int(1e1)
     RESET_TIMES = 10
     SAVE_FREQ = int(1e2)
-    IN_EPOCH_REPLAY = int(1e2)
+    IN_EPOCH_REPLAY = int(5e1)
 
     ALL_BITS = False
     session_name = "experiments/learn_feature_corridor_16"

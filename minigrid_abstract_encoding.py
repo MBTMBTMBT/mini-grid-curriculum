@@ -49,6 +49,7 @@ def train_epoch(
         model: Binary2BinaryFeatureNet,
         writer: SummaryWriter,
         step_counter: int,
+        in_epoch_replay: int = 1,
         use_all_bits=False,
 ):
     num_terminals = len(dataset.done_state_action_state_set)
@@ -61,35 +62,37 @@ def train_epoch(
     dataloader_batch_size = batch_size - keep_terminals
     dataloader = DataLoader(dataset, batch_size=dataloader_batch_size, shuffle=True)
 
-    for batch in dataloader:
-        obs_vec0, actions, obs_vec1, rewards, is_terminated = batch
-        if keep_terminals > 0:
-            for _ in range(keep_terminals):
-                obs_vec0_, actions_, obs_vec1_, rewards_, is_terminated_ = dataset.__getitem__(-1)
-                obs_vec0_ = torch.unsqueeze(obs_vec0_, 0)
-                actions_ = torch.unsqueeze(actions_, 0)
-                obs_vec1_ = torch.unsqueeze(obs_vec1_, 0)
-                rewards_ = torch.unsqueeze(rewards_, 0)
-                is_terminated_ = torch.unsqueeze(is_terminated_, 0)
-                obs_vec0 = torch.cat((obs_vec0, obs_vec0_), 0)
-                actions = torch.cat((actions, actions_), 0)
-                obs_vec1 = torch.cat((obs_vec1, obs_vec1_), 0)
-                rewards = torch.cat((rewards, rewards_), 0)
-                is_terminated = torch.cat((is_terminated, is_terminated_), 0)
+    for _ in range(in_epoch_replay):
+        loss = 0.0
+        for batch in dataloader:
+            obs_vec0, actions, obs_vec1, rewards, is_terminated = batch
+            if keep_terminals > 0:
+                for _ in range(keep_terminals):
+                    obs_vec0_, actions_, obs_vec1_, rewards_, is_terminated_ = dataset.__getitem__(-1)
+                    obs_vec0_ = torch.unsqueeze(obs_vec0_, 0)
+                    actions_ = torch.unsqueeze(actions_, 0)
+                    obs_vec1_ = torch.unsqueeze(obs_vec1_, 0)
+                    rewards_ = torch.unsqueeze(rewards_, 0)
+                    is_terminated_ = torch.unsqueeze(is_terminated_, 0)
+                    obs_vec0 = torch.cat((obs_vec0, obs_vec0_), 0)
+                    actions = torch.cat((actions, actions_), 0)
+                    obs_vec1 = torch.cat((obs_vec1, obs_vec1_), 0)
+                    rewards = torch.cat((rewards, rewards_), 0)
+                    is_terminated = torch.cat((is_terminated, is_terminated_), 0)
 
-        # weights = np.arange(4, model.n_latent_dims + 1)
-        # weights = weights / weights.sum()
-        num_keep_dim = np.random.choice(np.arange(1, model.n_latent_dims + 1))  #, p=weights)
-        if use_all_bits:
-            num_keep_dim = model.n_latent_dims
-        losses = model.run_batch(obs_vec0, actions, obs_vec1, rewards, is_terminated, num_keep_dim, train=True)
-        loss, rec_loss, inv_loss, ratio_loss, reward_loss, terminate_loss, neighbour_loss = losses
-        if step_counter <= 0:
-            step_counter = 1
-        names = ['loss', 'rec_loss', 'inv_loss', 'ratio_loss', 'reward_loss', 'terminate_loss', 'neighbour_loss']
-        for name, val in zip(names, losses):
-            writer.add_scalar(name, val, step_counter)
-        step_counter += 1
+            # weights = np.arange(4, model.n_latent_dims + 1)
+            # weights = weights / weights.sum()
+            num_keep_dim = np.random.choice(np.arange(1, model.n_latent_dims + 1))  #, p=weights)
+            if use_all_bits:
+                num_keep_dim = model.n_latent_dims
+            losses = model.run_batch(obs_vec0, actions, obs_vec1, rewards, is_terminated, num_keep_dim, train=True)
+            loss, rec_loss, inv_loss, ratio_loss, reward_loss, terminate_loss, neighbour_loss = losses
+            if step_counter <= 0:
+                step_counter = 1
+            names = ['loss', 'rec_loss', 'inv_loss', 'ratio_loss', 'reward_loss', 'terminate_loss', 'neighbour_loss']
+            for name, val in zip(names, losses):
+                writer.add_scalar(name, val, step_counter)
+            step_counter += 1
         return loss, step_counter
 
 
@@ -294,7 +297,7 @@ if __name__ == '__main__':
     # model configs
     NUM_ACTIONS = int(train_list_envs[0].env.action_space.n)
     OBS_SPACE = int(train_list_envs[0].total_features)
-    LATENT_DIMS = 32
+    LATENT_DIMS = 16
 
     # train hyperparams
     WEIGHTS = {'inv': 1.0, 'dis': 1.0, 'neighbour': 1.0, 'dec': 1.0, 'rwd': 1.0, 'terminate': 1.0}
@@ -302,13 +305,14 @@ if __name__ == '__main__':
     LR = 1e-4
 
     # train configs
-    EPOCHS = int(2e4)
-    RESAMPLE_FREQ = int(1e3)
-    RESET_TIMES = 25
-    SAVE_FREQ = int(1e3)
+    EPOCHS = int(5e2)
+    RESAMPLE_FREQ = int(1e1)
+    RESET_TIMES = 10
+    SAVE_FREQ = int(1e2)
+    IN_EPOCH_REPLAY = int(1e2)
 
     ALL_BITS = False
-    session_name = "experiments/learn_feature_corridor_32_big_loss"
+    session_name = "experiments/learn_feature_corridor_16"
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model = Binary2BinaryFeatureNet(NUM_ACTIONS, OBS_SPACE, n_latent_dims=LATENT_DIMS, lr=LR, weights=WEIGHTS, device=device,).to(device)
@@ -360,7 +364,7 @@ if __name__ == '__main__':
 
             dataset = OneHotDataset(state_action_state_to_reward_dict, done_state_action_state_set)
 
-        loss_val, step_counter = train_epoch(dataset, BATCH_SIZE, model, tb_writer, step_counter, use_all_bits=ALL_BITS)
+        loss_val, step_counter = train_epoch(dataset, BATCH_SIZE, model, tb_writer, step_counter, in_epoch_replay=IN_EPOCH_REPLAY, use_all_bits=ALL_BITS)
 
         if epoch_counter % SAVE_FREQ == 0:
             model.save(f"{session_name}/model_epoch_{epoch_counter}.pth", epoch_counter, step_counter, performance)

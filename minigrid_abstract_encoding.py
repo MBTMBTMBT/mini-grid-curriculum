@@ -141,6 +141,9 @@ class EncodingMDPLearner(OneHotEncodingMDPLearner):
         self.encoded_done_states = set()
         self.encoded_state_set = set()
 
+        self.encoded_state_to_unencoded_state_dict = dict()
+        self.unencoded_state_image_dict = dict()
+
         self.keep_dims = keep_dims if keep_dims is not None else encoder.num_output_dims
 
     def encode(self, obs: np.ndarray) -> np.ndarray:
@@ -157,7 +160,7 @@ class EncodingMDPLearner(OneHotEncodingMDPLearner):
         current_state_code = numpy_binary_array_to_string(obs)
         self.state_set.add(current_state_code)
         self.start_state = current_state_code
-        self.encoded_start_state = self.encode_str(current_state_code)[0:self.keep_dims]
+        self.encoded_start_state = hex(int(self.encode_str(current_state_code)[0:self.keep_dims], 2))
         state_action_count = 0
         while True:
             new_state_set = set()
@@ -178,7 +181,7 @@ class EncodingMDPLearner(OneHotEncodingMDPLearner):
 
                         if done:
                             self.done_states.add(next_state_code)
-                            self.encoded_done_states.add(self.encode_str(next_state_code)[0:self.keep_dims])
+                            self.encoded_done_states.add(hex(int(self.encode_str(next_state_code)[0:self.keep_dims], 2)))
                             self.done_state_action_state_set.add(current_state_action_state_code)
 
                         if current_state_action_code not in self.state_action_set:
@@ -190,11 +193,16 @@ class EncodingMDPLearner(OneHotEncodingMDPLearner):
                         if verbose >= 1:
                             print(f"Added [state-action pair num: {state_action_count}]: {hash(current_state_action_code)} -- {action} -> {hash(next_state_code)} Reward: {reward}")
 
-                        self.mdp_graph.add_transition(self.encode_str(current_state_code)[0:self.keep_dims], action, self.encode_str(next_state_code)[0:self.keep_dims], 1.0)
-                        self.mdp_graph.add_reward(self.encode_str(current_state_code)[0:self.keep_dims], action, self.encode_str(next_state_code)[0:self.keep_dims], float(reward))
+                        self.mdp_graph.add_transition(hex(int(self.encode_str(current_state_code)[0:self.keep_dims], 2)), action, hex(int(self.encode_str(next_state_code)[0:self.keep_dims], 2)), 1.0)
+                        self.mdp_graph.add_reward(hex(int(self.encode_str(current_state_code)[0:self.keep_dims], 2)), action, hex(int(self.encode_str(current_state_code)[0:self.keep_dims], 2)), float(reward))
             for new_state_code in new_state_set:
                 self.state_set.add(new_state_code)
-                self.encoded_state_set.add(self.encode_str(new_state_code)[0:self.keep_dims])
+                self.env.set_env_with_code(string_to_numpy_binary_array(new_state_code))
+                self.unencoded_state_image_dict[new_state_code] = self.env.env.get_frame(self.env.env.highlight, self.env.env.tile_size, self.env.env.agent_pov)
+                self.encoded_state_set.add(hex(int(self.encode_str(new_state_code)[0:self.keep_dims], 2)))
+                if hex(int(self.encode_str(new_state_code)[0:self.keep_dims], 2)) not in self.encoded_state_to_unencoded_state_dict.keys():
+                    self.encoded_state_to_unencoded_state_dict[hex(int(self.encode_str(new_state_code)[0:self.keep_dims], 2))] = set()
+                self.encoded_state_to_unencoded_state_dict[hex(int(self.encode_str(new_state_code)[0:self.keep_dims], 2))].add(new_state_code)
             for new_state_action_code in new_state_action_set:
                 self.state_action_set.add(new_state_action_code)
             if len(new_state_set) == 0 and len(new_state_action_set) == 0:
@@ -289,8 +297,8 @@ if __name__ == '__main__':
     LATENT_DIMS = 32
 
     # train hyperparams
-    WEIGHTS = {'inv': 0.35, 'dis': 0.35, 'neighbour': 0.1, 'dec': 0.05, 'rwd': 0.05, 'terminate': 0.05}
-    BATCH_SIZE = 32
+    WEIGHTS = {'inv': 1.0, 'dis': 1.0, 'neighbour': 1.0, 'dec': 1.0, 'rwd': 1.0, 'terminate': 1.0}
+    BATCH_SIZE = 8
     LR = 1e-4
 
     # train configs
@@ -300,7 +308,7 @@ if __name__ == '__main__':
     SAVE_FREQ = int(1e3)
 
     ALL_BITS = False
-    session_name = "experiments/learn_feature_corridor_32_new_loss"
+    session_name = "experiments/learn_feature_corridor_32_big_loss"
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model = Binary2BinaryFeatureNet(NUM_ACTIONS, OBS_SPACE, n_latent_dims=LATENT_DIMS, lr=LR, weights=WEIGHTS, device=device,).to(device)

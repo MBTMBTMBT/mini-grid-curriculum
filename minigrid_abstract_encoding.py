@@ -305,7 +305,7 @@ if __name__ == '__main__':
     LR = 1e-4
 
     # train configs
-    EPOCHS = int(5e2)
+    EPOCHS = int(2.5e2)
     RESAMPLE_FREQ = int(1e1)
     RESET_TIMES = 10
     SAVE_FREQ = int(1e2)

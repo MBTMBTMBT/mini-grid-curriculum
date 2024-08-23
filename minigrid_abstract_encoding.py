@@ -300,12 +300,13 @@ if __name__ == '__main__':
     # model configs
     NUM_ACTIONS = int(train_list_envs[0].env.action_space.n)
     OBS_SPACE = int(train_list_envs[0].total_features)
-    LATENT_DIMS = 16
+    LATENT_DIMS = 32
 
     # train hyperparams
-    WEIGHTS = {'inv': 0.35, 'dis': 0.35, 'neighbour': 0.05, 'dec': 0.05, 'rwd': 0.05, 'terminate': 0.15}
+    WEIGHTS = {'inv': 0.5, 'dis': 0.5, 'neighbour': 0.0, 'dec': 0.0, 'rwd': 0.0, 'terminate': 0.1}
     BATCH_SIZE = 16
     LR = 1e-4
+    ALL_BITS = True
 
     # train configs
     EPOCHS = int(1e3)
@@ -314,8 +315,7 @@ if __name__ == '__main__':
     SAVE_FREQ = int(1e2)
     IN_EPOCH_REPLAY = int(1e2)
 
-    ALL_BITS = False
-    session_name = "experiments/learn_feature_corridor_16"
+    session_name = "experiments/learn_feature_corridor_32__"
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model = Binary2BinaryFeatureNet(NUM_ACTIONS, OBS_SPACE, n_latent_dims=LATENT_DIMS, lr=LR, weights=WEIGHTS, device=device,).to(device)

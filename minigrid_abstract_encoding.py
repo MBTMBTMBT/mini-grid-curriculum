@@ -300,22 +300,22 @@ if __name__ == '__main__':
     # model configs
     NUM_ACTIONS = int(train_list_envs[0].env.action_space.n)
     OBS_SPACE = int(train_list_envs[0].total_features)
-    LATENT_DIMS = 32
+    LATENT_DIMS = 64
 
     # train hyperparams
-    WEIGHTS = {'inv': 0.5, 'dis': 0.5, 'neighbour': 0.0, 'dec': 0.0, 'rwd': 0.0, 'terminate': 0.1}
-    BATCH_SIZE = 16
-    LR = 1e-4
-    ALL_BITS = True
+    WEIGHTS = {'inv': 1.0, 'dis': 1.0, 'neighbour': 0.1, 'dec': 0.1, 'rwd': 0.1, 'terminate': 1.0}
+    BATCH_SIZE = 32
+    LR = 1e-3
+    ALL_BITS = False
 
     # train configs
-    EPOCHS = int(1e3)
-    RESAMPLE_FREQ = int(1e1)
+    EPOCHS = int(2e3)
+    RESAMPLE_FREQ = int(2e1)
     RESET_TIMES = 10
     SAVE_FREQ = int(1e2)
     IN_EPOCH_REPLAY = int(1e2)
 
-    session_name = "experiments/learn_feature_corridor_32"
+    session_name = "experiments/learn_feature_corridor_64"
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model = Binary2BinaryFeatureNet(NUM_ACTIONS, OBS_SPACE, n_latent_dims=LATENT_DIMS, lr=LR, weights=WEIGHTS, device=device,).to(device)
@@ -367,7 +367,7 @@ if __name__ == '__main__':
 
             dataset = OneHotDataset(state_action_state_to_reward_dict, done_state_action_state_set)
 
-        slope = 1 + i / len(progress_bar) * 10
+        slope = 1 + int(i / len(progress_bar) * 10)
         model.slope = slope
         model.use_bin = False
         loss_val, step_counter = train_epoch(dataset, BATCH_SIZE, model, tb_writer, step_counter, in_epoch_replay=IN_EPOCH_REPLAY, use_all_bits=ALL_BITS)

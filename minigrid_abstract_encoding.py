@@ -315,7 +315,7 @@ if __name__ == '__main__':
     SAVE_FREQ = int(1e2)
     IN_EPOCH_REPLAY = int(1e2)
 
-    session_name = "experiments/learn_feature_corridor_32__"
+    session_name = "experiments/learn_feature_corridor_32"
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model = Binary2BinaryFeatureNet(NUM_ACTIONS, OBS_SPACE, n_latent_dims=LATENT_DIMS, lr=LR, weights=WEIGHTS, device=device,).to(device)
@@ -347,7 +347,7 @@ if __name__ == '__main__':
     dataset = OneHotDataset(state_action_state_to_reward_dict, done_state_action_state_set)
 
     progress_bar = tqdm(range(epoch_counter, EPOCHS), desc=f'Training Epoch {epoch_counter}')
-    for i, batch in enumerate(progress_bar):
+    for i, _ in enumerate(progress_bar):
         if epoch_counter % RESAMPLE_FREQ == 0 or len(state_action_state_to_reward_dict) == 0:
             state_action_state_to_reward_dict = {}
             done_state_action_state_set = set()
@@ -367,6 +367,9 @@ if __name__ == '__main__':
 
             dataset = OneHotDataset(state_action_state_to_reward_dict, done_state_action_state_set)
 
+        slope = 1 + i / len(progress_bar) * 10
+        model.slope = slope
+        model.use_bin = False
         loss_val, step_counter = train_epoch(dataset, BATCH_SIZE, model, tb_writer, step_counter, in_epoch_replay=IN_EPOCH_REPLAY, use_all_bits=ALL_BITS)
 
         if epoch_counter % SAVE_FREQ == 0:

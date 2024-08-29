@@ -376,4 +376,4 @@ if __name__ == '__main__':
             model.save(f"{session_name}/model_epoch_{epoch_counter}.pth", epoch_counter, step_counter, performance)
         epoch_counter += 1
         progress_bar.set_description(
-            f'Train Epoch {epoch_counter}: Loss: {loss_val:.2f}')
+            f'Train Epoch {epoch_counter}: Loss: {loss_val:.2f}, Sigmoid Slope: {slope:.2f}')

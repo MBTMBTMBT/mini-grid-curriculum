@@ -300,22 +300,22 @@ if __name__ == '__main__':
     # model configs
     NUM_ACTIONS = int(train_list_envs[0].env.action_space.n)
     OBS_SPACE = int(train_list_envs[0].total_features)
-    LATENT_DIMS = 64
+    LATENT_DIMS = 16
 
     # train hyperparams
-    WEIGHTS = {'inv': 1.0, 'dis': 1.0, 'neighbour': 0.1, 'dec': 0.1, 'rwd': 0.1, 'terminate': 1.0}
-    BATCH_SIZE = 32
-    LR = 1e-3
-    ALL_BITS = False
+    WEIGHTS = {'inv': 1.0, 'dis': 1.0, 'neighbour': 0.0, 'dec': 0.0, 'rwd': 0.1, 'terminate': 1.0}
+    BATCH_SIZE = 8
+    LR = 1e-4
+    ALL_BITS = True
 
     # train configs
-    EPOCHS = int(2e3)
+    EPOCHS = int(2e2)
     RESAMPLE_FREQ = int(2e1)
     RESET_TIMES = 10
     SAVE_FREQ = int(1e2)
     IN_EPOCH_REPLAY = int(1e2)
 
-    session_name = "experiments/learn_feature_corridor_64"
+    session_name = "experiments/learn_feature_corridor_16"
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model = Binary2BinaryFeatureNet(NUM_ACTIONS, OBS_SPACE, n_latent_dims=LATENT_DIMS, lr=LR, weights=WEIGHTS, device=device,).to(device)
@@ -347,7 +347,7 @@ if __name__ == '__main__':
     dataset = OneHotDataset(state_action_state_to_reward_dict, done_state_action_state_set)
 
     progress_bar = tqdm(range(epoch_counter, EPOCHS), desc=f'Training Epoch {epoch_counter}')
-    for i, _ in enumerate(progress_bar):
+    for _, i in enumerate(progress_bar):
         if epoch_counter % RESAMPLE_FREQ == 0 or len(state_action_state_to_reward_dict) == 0:
             state_action_state_to_reward_dict = {}
             done_state_action_state_set = set()
@@ -367,13 +367,17 @@ if __name__ == '__main__':
 
             dataset = OneHotDataset(state_action_state_to_reward_dict, done_state_action_state_set)
 
-        slope = 1 + int(i / len(progress_bar) * 10)
+        slope = 2 ** int(i / EPOCHS * 10)
         model.slope = slope
         model.use_bin = False
+        if slope > 32.0:
+            model.use_bin = True
         loss_val, step_counter = train_epoch(dataset, BATCH_SIZE, model, tb_writer, step_counter, in_epoch_replay=IN_EPOCH_REPLAY, use_all_bits=ALL_BITS)
 
         if epoch_counter % SAVE_FREQ == 0:
             model.save(f"{session_name}/model_epoch_{epoch_counter}.pth", epoch_counter, step_counter, performance)
         epoch_counter += 1
         progress_bar.set_description(
-            f'Train Epoch {epoch_counter}: Loss: {loss_val:.2f}, Sigmoid Slope: {slope:.2f}')
+            f'Train Epoch {epoch_counter}: Loss: {loss_val:.2f}, Sigmoid Slope: {slope:.1f}')
+
+    model.save(f"{session_name}/model_epoch_{epoch_counter}.pth", epoch_counter, step_counter, performance)

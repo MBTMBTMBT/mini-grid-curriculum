@@ -98,7 +98,7 @@ if __name__ == '__main__':
     optimal_graph.compute_optimal_policy(0.999, threshold=1e-5)
     optimal_graph.control_info_iteration(1.0, threshold=1e-5)
     optimal_graph.value_iteration(1.0, threshold=1e-5)
-    optimal_policy = optimal_graph.get_free_energy(beta=1e1)
+    optimal_policy = optimal_graph.free_energy_iteration(beta=1e1)
     optimal_graph.visualize_policy_and_values(title="Policy and Values", value_type="value",
                                               highlight_states=[learner.start_state, *learner.done_states],
                                               use_grid_layout=False, display_state_name=False)

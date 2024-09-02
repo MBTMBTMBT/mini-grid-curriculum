@@ -277,7 +277,7 @@ class InfoEvalSaveCallback(EvalSaveCallback):
                 keep_dims=self.keep_dims,
             )
 
-            self.policy_graphs_agent_prior[env_name].value_iteration(
+            self.policy_graphs_uniform_prior[env_name].value_iteration(
                 gamma=self.iter_gamma,
                 threshold=self.iter_threshold,
                 max_iterations=self.max_iter,
@@ -292,11 +292,17 @@ class InfoEvalSaveCallback(EvalSaveCallback):
                 threshold=self.iter_threshold,
                 max_iterations=self.max_iter,
             )
+            self.policy_graphs_uniform_prior[env_name].free_energy_iteration(
+                beta=1.0,
+                gamma=self.iter_gamma,
+                threshold=self.iter_threshold,
+                max_iterations=self.max_iter,
+            )
 
-            min_value = min(self.policy_graphs_agent_prior[env_name].policy_value.values())
-            mean_value = statistics.mean(self.policy_graphs_agent_prior[env_name].policy_value.values())
+            min_value = min(self.policy_graphs_uniform_prior[env_name].policy_value.values())
+            mean_value = statistics.mean(self.policy_graphs_uniform_prior[env_name].policy_value.values())
             start_position_value \
-                = self.policy_graphs_agent_prior[env_name].policy_value[self.mdp_learners[env_name].start_state]
+                = self.policy_graphs_uniform_prior[env_name].policy_value[self.mdp_learners[env_name].start_state]
 
             max_control_info_gain = max(self.policy_graphs_agent_prior[env_name].control_info.values())
             mean_control_info_gain = statistics.mean(self.policy_graphs_agent_prior[env_name].control_info.values())
@@ -308,10 +314,16 @@ class InfoEvalSaveCallback(EvalSaveCallback):
             start_position_control_info \
                 = self.policy_graphs_uniform_prior[env_name].control_info[self.mdp_learners[env_name].start_state]
 
+            max_free_energy = max(self.policy_graphs_uniform_prior[env_name].free_energy.values())
+            mean_free_energy = statistics.mean(self.policy_graphs_uniform_prior[env_name].free_energy.values())
+            start_position_free_energy \
+                = self.policy_graphs_uniform_prior[env_name].free_energy[self.mdp_learners[env_name].start_state]
+
             if self.verbose >= 1:
                 print(f"Value of {env_name}: min: {min_value:.2f}, mean:{mean_value:.2f}, start position: {start_position_value:.2f}")
                 print(f"Info Gain of {env_name}: max: {max_control_info_gain:.2f}, mean:{mean_control_info_gain:.2f}, start position: {start_position_control_info_gain:.2f}")
                 print(f"Control Info of {env_name}: max: {max_control_info:.2f}, mean:{mean_control_info:.2f}, start position: {start_position_control_info:.2f}")
+                print(f"Free Energy of {env_name}: max: {max_free_energy:.2f}, mean:{mean_free_energy:.2f}, start position: {start_position_free_energy:.2f}")
 
             self.log_writer.add_scalar(
                 f'{env_name}/value_min', min_value, self.num_timesteps + self.start_timestep
@@ -339,4 +351,14 @@ class InfoEvalSaveCallback(EvalSaveCallback):
             )
             self.log_writer.add_scalar(
                 f'{env_name}/control_info_start_pos', start_position_control_info, self.num_timesteps + self.start_timestep
+            )
+            self.log_writer.add_scalar(
+                f'{env_name}/free_energy_max', max_free_energy, self.num_timesteps + self.start_timestep
+            )
+            self.log_writer.add_scalar(
+                f'{env_name}/free_energy_mean', mean_free_energy, self.num_timesteps + self.start_timestep
+            )
+            self.log_writer.add_scalar(
+                f'{env_name}/free_energy_start_pos', start_position_free_energy,
+                self.num_timesteps + self.start_timestep
             )

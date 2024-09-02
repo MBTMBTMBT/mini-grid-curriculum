@@ -348,35 +348,21 @@ if __name__ == '__main__':
     # ========= This section need to be optimized =========
     NUM_ACTIONS = 7
     OBS_SPACE = 2575
-    LATENT_DIMS = 32
+    LATENT_DIMS = 16
     LR = 0.0
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    WEIGHTS = {'inv': 0.3, 'dis': 0.3, 'neighbour': 0.3, 'dec': 0.0001, 'rwd': 0.05, 'terminate': 0.05}
+    WEIGHTS = {'inv': 1.0, 'dis': 1.0, 'neighbour': 0.0, 'dec': 0.0, 'rwd': 0.1, 'terminate': 1.0}
 
     model = Binary2BinaryFeatureNet(NUM_ACTIONS, OBS_SPACE, n_latent_dims=LATENT_DIMS, lr=LR, weights=WEIGHTS,
                                     device=device, )
-    model.load(r'experiments/learn_feature_corridor_32_new_loss/model_epoch_19000.pth')
+    model.load(r'experiments/learn_feature_corridor_16/model_epoch_200.pth')
     encoder = model.encoder.to(device)
     # =====================================================
 
     # encoder = None  # test non encoding case
     runner = CurriculumRunner(task_configs, target_configs)
     runner.train(
-        session_dir="./experiments/corridor_encode_32_new_loss",
-        eval_freq=int(5e3),
-        compute_info_freq=int(5e3),
-        num_eval_episodes=50,
-        eval_deterministic=False,
-        force_sequential=True,
-        start_time_step=0,
-        iter_gamma=0.999,
-        iter_threshold=1e-5,
-        max_iter=int(1e5),
-        encoder=encoder,
-        keep_dims=32,
-    )
-    runner.train(
-        session_dir="./experiments/corridor_encode_16_new_loss",
+        session_dir="./experiments/train_16",
         eval_freq=int(5e3),
         compute_info_freq=int(5e3),
         num_eval_episodes=50,
@@ -389,8 +375,73 @@ if __name__ == '__main__':
         encoder=encoder,
         keep_dims=16,
     )
+
+    # ========= This section need to be optimized =========
+    NUM_ACTIONS = 7
+    OBS_SPACE = 2575
+    LATENT_DIMS = 24
+    LR = 0.0
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    WEIGHTS = {'inv': 1.0, 'dis': 1.0, 'neighbour': 0.0, 'dec': 0.0, 'rwd': 0.1, 'terminate': 1.0}
+
+    model = Binary2BinaryFeatureNet(NUM_ACTIONS, OBS_SPACE, n_latent_dims=LATENT_DIMS, lr=LR, weights=WEIGHTS,
+                                    device=device, )
+    model.load(r'experiments/learn_feature_corridor_24/model_epoch_200.pth')
+    encoder = model.encoder.to(device)
+    # =====================================================
+
+    # encoder = None  # test non encoding case
+    runner = CurriculumRunner(task_configs, target_configs)
     runner.train(
-        session_dir="./experiments/corridor_not_encoded",
+        session_dir="./experiments/train_24",
+        eval_freq=int(5e3),
+        compute_info_freq=int(5e3),
+        num_eval_episodes=50,
+        eval_deterministic=False,
+        force_sequential=True,
+        start_time_step=0,
+        iter_gamma=0.999,
+        iter_threshold=1e-5,
+        max_iter=int(1e5),
+        encoder=encoder,
+        keep_dims=24,
+    )
+
+    # ========= This section need to be optimized =========
+    NUM_ACTIONS = 7
+    OBS_SPACE = 2575
+    LATENT_DIMS = 32
+    LR = 0.0
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    WEIGHTS = {'inv': 1.0, 'dis': 1.0, 'neighbour': 0.0, 'dec': 0.0, 'rwd': 0.1, 'terminate': 1.0}
+
+    model = Binary2BinaryFeatureNet(NUM_ACTIONS, OBS_SPACE, n_latent_dims=LATENT_DIMS, lr=LR, weights=WEIGHTS,
+                                    device=device, )
+    model.load(r'experiments/learn_feature_corridor_32/model_epoch_200.pth')
+    encoder = model.encoder.to(device)
+    # =====================================================
+
+    # encoder = None  # test non encoding case
+    runner = CurriculumRunner(task_configs, target_configs)
+    runner.train(
+        session_dir="./experiments/train_32",
+        eval_freq=int(5e3),
+        compute_info_freq=int(5e3),
+        num_eval_episodes=50,
+        eval_deterministic=False,
+        force_sequential=True,
+        start_time_step=0,
+        iter_gamma=0.999,
+        iter_threshold=1e-5,
+        max_iter=int(1e5),
+        encoder=encoder,
+        keep_dims=32,
+    )
+
+    # encoder = None  # test non encoding case
+    runner = CurriculumRunner(task_configs, target_configs)
+    runner.train(
+        session_dir="./experiments/train_no_encode",
         eval_freq=int(5e3),
         compute_info_freq=int(5e3),
         num_eval_episodes=50,
@@ -403,3 +454,4 @@ if __name__ == '__main__':
         encoder=None,
         keep_dims=-1,
     )
+

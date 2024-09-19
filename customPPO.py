@@ -1,9 +1,12 @@
 from typing import Callable, Optional, List, Dict, Union, Type
 
+import numpy as np
 import torch as th
 import torch.nn as nn
 import gymnasium as gym
+from matplotlib import pyplot as plt
 from stable_baselines3 import PPO
+from stable_baselines3.common.evaluation import evaluate_policy
 from stable_baselines3.common.policies import ActorCriticPolicy
 from stable_baselines3.common.env_util import make_vec_env
 from torch.distributions import Categorical, Normal
@@ -37,6 +40,9 @@ class CustomEncoderExtractor(BaseFeaturesExtractor):
         # Create the sequential model
         self.encoder = nn.Sequential(*layers)
 
+        # reset the output dimension
+        self._features_dim = net_arch[-1]
+
         # Initially, the network is not frozen
         self.frozen = False
 
@@ -44,7 +50,8 @@ class CustomEncoderExtractor(BaseFeaturesExtractor):
         # First flatten the input (same as FlattenExtractor)
         observations = observations.view(observations.size(0), -1)
         # Then pass through the encoder network
-        return self.encoder(observations)
+        encoded = self.encoder(observations)
+        return encoded
 
     def freeze(self):
         """
@@ -88,34 +95,105 @@ class CustomActorCriticPolicy(ActorCriticPolicy):
         print("MLP Extractor is now unfrozen.")
 
 
+# Evaluation function
+def evaluate_model(model, env, n_eval_episodes=5):
+    mean_reward, _ = evaluate_policy(model, env, n_eval_episodes=n_eval_episodes, return_episode_rewards=False)
+    return mean_reward
+
+
 if __name__ == '__main__':
     # Create environment
-    env = make_vec_env('CartPole-v1', n_envs=1)
+    env = make_vec_env("CartPole-v1", n_envs=1)
 
-    # Define custom architecture parameters
+    # Define policy kwargs
     policy_kwargs = dict(
-        shared_layers=[128, 128],  # Shared feature extractor layers
-        policy_layers=[128, 64],   # Policy network layers
-        value_layers=[128, 64],    # Value network layers
-        activation_fn=nn.Tanh      # Custom activation function (Tanh)
+        features_extractor_class=CustomEncoderExtractor,  # Use the custom encoder extractor
+        features_extractor_kwargs=dict(
+            net_arch=[128, 64],  # Custom layer sizes
+            activation_fn=nn.ReLU  # Activation function
+        ),
+        net_arch=[dict(pi=[64, 64], vf=[64, 64])],  # Policy and value network architecture
+        activation_fn=nn.ReLU,
     )
 
-    # Create PPO model with the custom policy network
-    model = PPO(CustomGeneralPolicy, env, policy_kwargs=policy_kwargs, verbose=1)
+    # Store rewards
+    rewards_all_frozen = []
+    rewards_first_half_frozen = []
+    rewards_second_half_frozen = []
+    rewards_unfrozen = []
 
-    # Freeze the policy network, unfreeze the value network
-    model.policy.freeze_layers(part="policy", freeze=True)
-    model.policy.freeze_layers(part="value", freeze=False)
+    # Number of epochs for each training (each epoch is 1000 timesteps)
+    epochs = 5
+    timesteps_per_epoch = 1000
 
-    # Begin training
-    timesteps = 10000
-    for i in range(timesteps // 1000):
-        if i % 2 == 0:
-            # Every 1000 steps, freeze the shared feature extractor
-            model.policy.freeze_layers(part="shared", freeze=True)
-        else:
-            # Unfreeze the shared feature extractor
-            model.policy.freeze_layers(part="shared", freeze=False)
+    # Training case 1: All layers frozen (mlp_extractor and feature_extractor)
+    print("\nTraining model with all layers frozen...")
+    model_all_frozen = PPO(CustomActorCriticPolicy, env, policy_kwargs=policy_kwargs, verbose=1)
+    model_all_frozen.policy.freeze_mlp_extractor()
+    model_all_frozen.policy.features_extractor.freeze()
+    for _ in range(epochs):
+        model_all_frozen.learn(total_timesteps=timesteps_per_epoch, reset_num_timesteps=False)
+        rewards_all_frozen.append(evaluate_model(model_all_frozen, env))
 
-        # Train the model for 1000 steps
-        model.learn(total_timesteps=1000)
+    # Training case 2: First half of layers frozen
+    print("\nTraining model with first half of layers frozen...")
+    model_first_half_frozen = PPO(CustomActorCriticPolicy, env, policy_kwargs=policy_kwargs, verbose=1)
+
+    # Freeze the first half of the mlp_extractor
+    total_mlp_layers = len(list(model_first_half_frozen.policy.mlp_extractor.children()))
+    for idx, layer in enumerate(model_first_half_frozen.policy.mlp_extractor.children()):
+        if idx < total_mlp_layers // 2:
+            for param in layer.parameters():
+                param.requires_grad = False
+
+    # Freeze the first half of the feature extractor
+    total_encoder_layers = len(list(model_first_half_frozen.policy.features_extractor.encoder.children()))
+    for idx, layer in enumerate(model_first_half_frozen.policy.features_extractor.encoder.children()):
+        if idx < total_encoder_layers // 2:
+            for param in layer.parameters():
+                param.requires_grad = False
+
+    for _ in range(epochs):
+        model_first_half_frozen.learn(total_timesteps=timesteps_per_epoch, reset_num_timesteps=False)
+        rewards_first_half_frozen.append(evaluate_model(model_first_half_frozen, env))
+
+    # Training case 3: Second half of layers frozen
+    print("\nTraining model with second half of layers frozen...")
+    model_second_half_frozen = PPO(CustomActorCriticPolicy, env, policy_kwargs=policy_kwargs, verbose=1)
+
+    # Freeze the second half of the mlp_extractor
+    for idx, layer in enumerate(model_second_half_frozen.policy.mlp_extractor.children()):
+        if idx >= total_mlp_layers // 2:
+            for param in layer.parameters():
+                param.requires_grad = False
+
+    # Freeze the second half of the feature extractor
+    for idx, layer in enumerate(model_second_half_frozen.policy.features_extractor.encoder.children()):
+        if idx >= total_encoder_layers // 2:
+            for param in layer.parameters():
+                param.requires_grad = False
+
+    for _ in range(epochs):
+        model_second_half_frozen.learn(total_timesteps=timesteps_per_epoch, reset_num_timesteps=False)
+        rewards_second_half_frozen.append(evaluate_model(model_second_half_frozen, env))
+
+    # Training case 4: All layers unfrozen
+    print("\nTraining model with all layers unfrozen...")
+    model_unfrozen = PPO(CustomActorCriticPolicy, env, policy_kwargs=policy_kwargs, verbose=1)
+    for _ in range(epochs):
+        model_unfrozen.learn(total_timesteps=timesteps_per_epoch, reset_num_timesteps=False)
+        rewards_unfrozen.append(evaluate_model(model_unfrozen, env))
+
+    # Plotting the results
+    epochs_range = np.arange(1, epochs + 1)
+    plt.figure(figsize=(10, 6))
+    plt.plot(epochs_range, rewards_all_frozen, label='All Frozen', marker='o')
+    plt.plot(epochs_range, rewards_first_half_frozen, label='First Half Frozen', marker='o')
+    plt.plot(epochs_range, rewards_second_half_frozen, label='Second Half Frozen', marker='o')
+    plt.plot(epochs_range, rewards_unfrozen, label='Unfrozen', marker='o')
+    plt.xlabel('Epochs (1000 timesteps per epoch)')
+    plt.ylabel('Mean Reward')
+    plt.title('Training Trend: Frozen vs Unfrozen Networks (Different Models)')
+    plt.legend()
+    plt.grid(True)
+    plt.show()

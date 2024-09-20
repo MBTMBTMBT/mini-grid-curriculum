@@ -49,8 +49,8 @@ def eval_envs(
             print(f"Evaluation of {env_name}: Mean reward: {mean_reward:.2f} +/- {std_reward:.2f}")
 
         # Log results to TensorBoard
-        log_writer.add_scalar(f'{env_name}/reward_mean', mean_reward, num_timesteps)
-        log_writer.add_scalar(f'{env_name}/reward_std', std_reward, num_timesteps)
+        log_writer.add_scalar(f'reward_mean/{env_name}', mean_reward, num_timesteps)
+        log_writer.add_scalar(f'reward_std/{env_name}', std_reward, num_timesteps)
 
         rewards.append(mean_reward)
 

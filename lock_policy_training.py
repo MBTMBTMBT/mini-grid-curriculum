@@ -55,14 +55,18 @@ class TargetConfig:
         self.max_steps: int = 0
 
 
-class CurriculumRunner:
+class LockPolicyTrainer:
     def __init__(
             self,
             task_configs: List[TaskConfig],
             target_configs: List[TargetConfig],
-            feature_encoder_net_arch: List[int],
-            mlp_net_arch: List[int] or List[Dict],
+            feature_encoder_net_arch=None,
+            mlp_net_arch=None,
     ):
+        if mlp_net_arch is None:
+            mlp_net_arch = [dict(pi=[64, 64], vf=[64, 64])]
+        if feature_encoder_net_arch is None:
+            feature_encoder_net_arch = [128, 64]
         self.task_configs = task_configs
         self.target_configs = target_configs
         self.max_minimum_display_size: int = 0
@@ -78,10 +82,10 @@ class CurriculumRunner:
         self.policy_kwargs = dict(
             features_extractor_class=CustomEncoderExtractor,  # Use the custom encoder extractor
             features_extractor_kwargs=dict(
-                net_arch=[128, 64],  # Custom layer sizes
+                net_arch=feature_encoder_net_arch,  # Custom layer sizes
                 activation_fn=nn.ReLU  # Activation function
             ),
-            net_arch=[dict(pi=[64, 64], vf=[64, 64])],  # Policy and value network architecture
+            net_arch=mlp_net_arch,  # Policy and value network architecture
             activation_fn=nn.ReLU,
         )
 
@@ -203,11 +207,11 @@ class CurriculumRunner:
             _model.policy.mlp_extractor.load_state_dict(model.policy.mlp_extractor.state_dict())
             _model.policy.freeze_mlp_extractor()
             _info_eval_callback = InfoEvalSaveCallback(
-                eval_envs=eval_env_list,
-                eval_env_names=eval_env_name_list,
+                eval_envs=[eval_env],
+                eval_env_names=[eval_env_name + "_policy_frozen"],
                 model=model,
                 model_save_dir=model_save_dir,
-                model_save_name=f"saved_model",
+                model_save_name=eval_env_name + "_policy_frozen",
                 log_writer=log_writer,
                 eval_freq=eval_freq,
                 compute_info_freq=compute_info_freq,

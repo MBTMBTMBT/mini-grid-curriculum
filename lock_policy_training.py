@@ -102,6 +102,26 @@ class LockPolicyTrainer:
             iter_threshold: float = 1e-5,
             max_iter: int = 1e5,
     ):
+        # Helper function to create a new environment instance for training and evaluation
+        def make_env(env_config, is_eval=False):
+            """
+            Create a new environment instance based on the task configuration.
+            :param env_config: Configuration object for the environment
+            :param is_eval: Boolean flag to determine if the environment is for evaluation or training
+            :return: A new environment instance
+            """
+            return FullyObsSB3MLPWrapper(
+                CustomEnv(
+                    txt_file_path=env_config.txt_file_path,
+                    display_size=self.max_minimum_display_size,
+                    display_mode=env_config.eval_display_mode if is_eval else env_config.train_display_mode,
+                    random_rotate=env_config.eval_random_rotate if is_eval else env_config.train_random_rotate,
+                    random_flip=env_config.eval_random_flip if is_eval else env_config.train_random_flip,
+                    custom_mission=env_config.custom_mission,
+                    max_steps=env_config.eval_max_steps if is_eval else env_config.train_max_steps,
+                )
+            )
+
         # prepare environments
         eval_env_list = []
         eval_env_name_list = []
@@ -113,36 +133,25 @@ class LockPolicyTrainer:
         train_env_steps = []
         train_env_names = []
         vec_train_steps = 0
+
         for each_task_config in self.task_configs:
-            train_env = FullyObsSB3MLPWrapper(
-                CustomEnv(
-                    txt_file_path=each_task_config.txt_file_path,
-                    display_size=self.max_minimum_display_size,
-                    display_mode=each_task_config.train_display_mode,
-                    random_rotate=each_task_config.train_random_rotate,
-                    random_flip=each_task_config.train_random_flip,
-                    custom_mission=each_task_config.custom_mission,
-                    max_steps=each_task_config.train_max_steps,
-                )
-            )
-            eval_env = FullyObsSB3MLPWrapper(
-                CustomEnv(
-                    txt_file_path=each_task_config.txt_file_path,
-                    display_size=self.max_minimum_display_size,
-                    display_mode=each_task_config.eval_display_mode,
-                    random_rotate=each_task_config.eval_random_rotate,
-                    random_flip=each_task_config.eval_random_flip,
-                    custom_mission=each_task_config.custom_mission,
-                    max_steps=each_task_config.eval_max_steps,
-                )
-            )
+            # Create new environments for training and evaluation
+            train_env = make_env(each_task_config, is_eval=False)
+            eval_env = make_env(each_task_config, is_eval=True)
+
             train_envs.append(train_env)
             train_env_steps.append(each_task_config.train_total_steps)
             train_env_names.append(each_task_config.name)
-            eval_env_list.append(VecMonitor(DummyVecEnv([lambda: eval_env])))
+
+            # Store evaluation environments and names
+            eval_env_list.append(VecMonitor(DummyVecEnv([lambda: make_env(each_task_config, is_eval=True)])))
             eval_env_name_list.append(each_task_config.name)
+
             vec_train_steps += each_task_config.train_total_steps
-        vec_train_env = VecMonitor(DummyVecEnv([lambda: env for env in train_envs]))
+
+        # Create VecMonitor for the training environments
+        vec_train_env = VecMonitor(
+            DummyVecEnv([lambda: make_env(each_task_config, is_eval=False) for each_task_config in self.task_configs]))
 
         for each_target_config in self.target_configs:
             target_env = FullyObsSB3MLPWrapper(
@@ -189,7 +198,6 @@ class LockPolicyTrainer:
             iter_gamma=iter_gamma,
             iter_threshold=iter_threshold,
             max_iter=max_iter,
-            encoder=encoder,
         )
 
         model.policy.features_extractor.unfreeze()
@@ -202,7 +210,7 @@ class LockPolicyTrainer:
         model.learn(total_timesteps=vec_train_steps, callback=callback_list, progress_bar=True)
 
         # start re-training by freezing the second half of the net and replace the first half.
-        for eval_env, eval_env_name in zip(eval_env_list, eval_env_name_list):
+        for eval_env, eval_env_name, each_task_config in zip(eval_env_list, eval_env_name_list, task_configs):
             _model = PPO(CustomActorCriticPolicy, env=vec_train_env, policy_kwargs=self.policy_kwargs, verbose=1)
             _model.policy.mlp_extractor.load_state_dict(model.policy.mlp_extractor.state_dict())
             _model.policy.freeze_mlp_extractor()
@@ -222,8 +230,12 @@ class LockPolicyTrainer:
                 iter_gamma=iter_gamma,
                 iter_threshold=iter_threshold,
                 max_iter=max_iter,
-                encoder=encoder,
             )
+
+            _callback_list = CallbackList(callbacks=[_info_eval_callback, ])
+
+            # train
+            _model.learn(total_timesteps=each_task_config.train_total_steps, callback=_callback_list, progress_bar=True)
 
         # close the writer
         log_writer.close()
@@ -241,7 +253,7 @@ if __name__ == '__main__':
     config.train_random_rotate = True
     config.train_random_flip = True
     config.train_max_steps = 500
-    config.train_total_steps = 5e4
+    config.train_total_steps = 10e4
     config.eval_display_mode = "middle"
     config.eval_random_rotate = False
     config.eval_random_flip = False
@@ -258,7 +270,7 @@ if __name__ == '__main__':
     config.train_random_rotate = True
     config.train_random_flip = True
     config.train_max_steps = 500
-    config.train_total_steps = 5e4
+    config.train_total_steps = 10e4
     config.eval_display_mode = "middle"
     config.eval_random_rotate = False
     config.eval_random_flip = False
@@ -275,7 +287,7 @@ if __name__ == '__main__':
     config.train_random_rotate = True
     config.train_random_flip = True
     config.train_max_steps = 500
-    config.train_total_steps = 5e4
+    config.train_total_steps = 10e4
     config.eval_display_mode = "middle"
     config.eval_random_rotate = False
     config.eval_random_flip = False
@@ -336,113 +348,16 @@ if __name__ == '__main__':
 
     target_configs = []
 
-    # ========= This section need to be optimized =========
-    NUM_ACTIONS = 7
-    OBS_SPACE = 2575
-    LATENT_DIMS = 16
-    LR = 0.0
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    WEIGHTS = {'inv': 1.0, 'dis': 1.0, 'neighbour': 0.0, 'dec': 0.0, 'rwd': 0.1, 'terminate': 1.0}
-
-    model = Binary2BinaryFeatureNet(NUM_ACTIONS, OBS_SPACE, n_latent_dims=LATENT_DIMS, lr=LR, weights=WEIGHTS,
-                                    device=device, )
-    model.load(r'experiments/learn_feature_corridor_16/model_epoch_200.pth')
-    encoder = model.encoder.to(device)
-    # =====================================================
-
     # encoder = None  # test non encoding case
-    runner = CurriculumRunner(task_configs, target_configs)
+    runner = LockPolicyTrainer(task_configs, target_configs)
     runner.train(
-        session_dir="./experiments/train_16",
-        eval_freq=int(5e3),
-        compute_info_freq=int(5e3),
+        session_dir="./experiments/lock_policy",
+        eval_freq=int(2e3),
+        compute_info_freq=int(2e3),
         num_eval_episodes=50,
         eval_deterministic=False,
-        force_sequential=True,
         start_time_step=0,
         iter_gamma=0.999,
         iter_threshold=1e-5,
         max_iter=int(1e5),
-        encoder=encoder,
-        keep_dims=16,
     )
-
-    # ========= This section need to be optimized =========
-    NUM_ACTIONS = 7
-    OBS_SPACE = 2575
-    LATENT_DIMS = 24
-    LR = 0.0
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    WEIGHTS = {'inv': 1.0, 'dis': 1.0, 'neighbour': 0.0, 'dec': 0.0, 'rwd': 0.1, 'terminate': 1.0}
-
-    model = Binary2BinaryFeatureNet(NUM_ACTIONS, OBS_SPACE, n_latent_dims=LATENT_DIMS, lr=LR, weights=WEIGHTS,
-                                    device=device, )
-    model.load(r'experiments/learn_feature_corridor_24/model_epoch_200.pth')
-    encoder = model.encoder.to(device)
-    # =====================================================
-
-    # encoder = None  # test non encoding case
-    runner = CurriculumRunner(task_configs, target_configs)
-    runner.train(
-        session_dir="./experiments/train_24",
-        eval_freq=int(5e3),
-        compute_info_freq=int(5e3),
-        num_eval_episodes=50,
-        eval_deterministic=False,
-        force_sequential=True,
-        start_time_step=0,
-        iter_gamma=0.999,
-        iter_threshold=1e-5,
-        max_iter=int(1e5),
-        encoder=encoder,
-        keep_dims=24,
-    )
-
-    # ========= This section need to be optimized =========
-    NUM_ACTIONS = 7
-    OBS_SPACE = 2575
-    LATENT_DIMS = 32
-    LR = 0.0
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    WEIGHTS = {'inv': 1.0, 'dis': 1.0, 'neighbour': 0.0, 'dec': 0.0, 'rwd': 0.1, 'terminate': 1.0}
-
-    model = Binary2BinaryFeatureNet(NUM_ACTIONS, OBS_SPACE, n_latent_dims=LATENT_DIMS, lr=LR, weights=WEIGHTS,
-                                    device=device, )
-    model.load(r'experiments/learn_feature_corridor_32/model_epoch_200.pth')
-    encoder = model.encoder.to(device)
-    # =====================================================
-
-    # encoder = None  # test non encoding case
-    runner = CurriculumRunner(task_configs, target_configs)
-    runner.train(
-        session_dir="./experiments/train_32",
-        eval_freq=int(5e3),
-        compute_info_freq=int(5e3),
-        num_eval_episodes=50,
-        eval_deterministic=False,
-        force_sequential=True,
-        start_time_step=0,
-        iter_gamma=0.999,
-        iter_threshold=1e-5,
-        max_iter=int(1e5),
-        encoder=encoder,
-        keep_dims=32,
-    )
-
-    # encoder = None  # test non encoding case
-    runner = CurriculumRunner(task_configs, target_configs)
-    runner.train(
-        session_dir="./experiments/train_no_encode",
-        eval_freq=int(5e3),
-        compute_info_freq=int(5e3),
-        num_eval_episodes=50,
-        eval_deterministic=False,
-        force_sequential=True,
-        start_time_step=0,
-        iter_gamma=0.999,
-        iter_threshold=1e-5,
-        max_iter=int(1e5),
-        encoder=None,
-        keep_dims=-1,
-    )
-

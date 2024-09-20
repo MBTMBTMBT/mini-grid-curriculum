@@ -221,7 +221,6 @@ class CurriculumRunner:
                 encoder=encoder,
             )
 
-
         # close the writer
         log_writer.close()
 

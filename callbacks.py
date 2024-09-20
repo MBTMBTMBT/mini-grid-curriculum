@@ -326,39 +326,39 @@ class InfoEvalSaveCallback(EvalSaveCallback):
                 print(f"Free Energy of {env_name}: max: {max_free_energy:.2f}, mean:{mean_free_energy:.2f}, start position: {start_position_free_energy:.2f}")
 
             self.log_writer.add_scalar(
-                f'{env_name}/value_min', min_value, self.num_timesteps + self.start_timestep
+                f'value_min/{env_name}', min_value, self.num_timesteps + self.start_timestep
             )
             self.log_writer.add_scalar(
-                f'{env_name}/value_mean', mean_value, self.num_timesteps + self.start_timestep
+                f'value_mean/{env_name}', mean_value, self.num_timesteps + self.start_timestep
             )
             self.log_writer.add_scalar(
-                f'{env_name}/value_start_pos', start_position_value, self.num_timesteps + self.start_timestep
+                f'value_start_pos/{env_name}', start_position_value, self.num_timesteps + self.start_timestep
             )
             self.log_writer.add_scalar(
-                f'{env_name}/info_gain_max', max_control_info_gain, self.num_timesteps + self.start_timestep
+                f'info_gain_max/{env_name}', max_control_info_gain, self.num_timesteps + self.start_timestep
             )
             self.log_writer.add_scalar(
-                f'{env_name}/info_gain_mean', mean_control_info_gain, self.num_timesteps + self.start_timestep
+                f'info_gain_mean/{env_name}', mean_control_info_gain, self.num_timesteps + self.start_timestep
             )
             self.log_writer.add_scalar(
-                f'{env_name}/info_gain_start_pos', start_position_control_info_gain, self.num_timesteps + self.start_timestep
+                f'info_gain_start_pos/{env_name}', start_position_control_info_gain, self.num_timesteps + self.start_timestep
             )
             self.log_writer.add_scalar(
-                f'{env_name}/control_info_max', max_control_info, self.num_timesteps + self.start_timestep
+                f'control_info_max/{env_name}', max_control_info, self.num_timesteps + self.start_timestep
             )
             self.log_writer.add_scalar(
-                f'{env_name}/control_info_mean', mean_control_info, self.num_timesteps + self.start_timestep
+                f'control_info_mean/{env_name}', mean_control_info, self.num_timesteps + self.start_timestep
             )
             self.log_writer.add_scalar(
-                f'{env_name}/control_info_start_pos', start_position_control_info, self.num_timesteps + self.start_timestep
+                f'control_info_start_pos/{env_name}', start_position_control_info, self.num_timesteps + self.start_timestep
             )
             self.log_writer.add_scalar(
-                f'{env_name}/free_energy_max', max_free_energy, self.num_timesteps + self.start_timestep
+                f'free_energy_max/{env_name}', max_free_energy, self.num_timesteps + self.start_timestep
             )
             self.log_writer.add_scalar(
-                f'{env_name}/free_energy_mean', mean_free_energy, self.num_timesteps + self.start_timestep
+                f'free_energy_mean/{env_name}', mean_free_energy, self.num_timesteps + self.start_timestep
             )
             self.log_writer.add_scalar(
-                f'{env_name}/free_energy_start_pos', start_position_free_energy,
+                f'free_energy_start_pos/{env_name}', start_position_free_energy,
                 self.num_timesteps + self.start_timestep
             )

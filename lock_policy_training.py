@@ -374,7 +374,7 @@ if __name__ == '__main__':
     config.display_mode = "middle"
     config.max_steps = 50
 
-    target_configs = []
+    target_configs = [config]
 
     # encoder = None  # test non encoding case
     for i in range(10):

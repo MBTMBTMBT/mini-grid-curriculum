@@ -364,6 +364,16 @@ if __name__ == '__main__':
     # config.difficulty_level = 4
     # task_configs.append(config)
 
+    config = TargetConfig()
+    config.name = "extra_long_corridor"
+    config.txt_file_path = r"./maps/extra_long_corridor.txt"
+    config.custom_mission = "reach the goal"
+    config.minimum_display_size = 11
+    config.random_rotate = True
+    config.random_flip = True
+    config.display_mode = "middle"
+    config.max_steps = 50
+
     target_configs = []
 
     # encoder = None  # test non encoding case

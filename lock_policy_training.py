@@ -102,71 +102,89 @@ class LockPolicyTrainer:
             iter_threshold: float = 1e-5,
             max_iter: int = 1e5,
     ):
-        # Helper function to create a new environment instance for training and evaluation
-        def make_env(env_config, is_eval=False):
+        # Helper function to create a new environment instance for training, evaluation, or target
+        def make_env(env_config, env_type="train"):
             """
-            Create a new environment instance based on the task configuration.
+            Create a new environment instance based on the configuration and environment type.
+
             :param env_config: Configuration object for the environment
-            :param is_eval: Boolean flag to determine if the environment is for evaluation or training
+            :param env_type: A string indicating the type of environment: "train", "eval", or "target"
             :return: A new environment instance
             """
-            return FullyObsSB3MLPWrapper(
-                CustomEnv(
-                    txt_file_path=env_config.txt_file_path,
-                    display_size=self.max_minimum_display_size,
-                    display_mode=env_config.eval_display_mode if is_eval else env_config.train_display_mode,
-                    random_rotate=env_config.eval_random_rotate if is_eval else env_config.train_random_rotate,
-                    random_flip=env_config.eval_random_flip if is_eval else env_config.train_random_flip,
-                    custom_mission=env_config.custom_mission,
-                    max_steps=env_config.eval_max_steps if is_eval else env_config.train_max_steps,
+            if env_type == "train":
+                return FullyObsSB3MLPWrapper(
+                    CustomEnv(
+                        txt_file_path=env_config.txt_file_path,
+                        display_size=self.max_minimum_display_size,
+                        display_mode=env_config.train_display_mode,
+                        random_rotate=env_config.train_random_rotate,
+                        random_flip=env_config.train_random_flip,
+                        custom_mission=env_config.custom_mission,
+                        max_steps=env_config.train_max_steps,
+                    )
                 )
-            )
+            elif env_type == "eval":
+                return FullyObsSB3MLPWrapper(
+                    CustomEnv(
+                        txt_file_path=env_config.txt_file_path,
+                        display_size=self.max_minimum_display_size,
+                        display_mode=env_config.eval_display_mode,
+                        random_rotate=env_config.eval_random_rotate,
+                        random_flip=env_config.eval_random_flip,
+                        custom_mission=env_config.custom_mission,
+                        max_steps=env_config.eval_max_steps,
+                    )
+                )
+            elif env_type == "target":
+                return FullyObsSB3MLPWrapper(
+                    CustomEnv(
+                        txt_file_path=env_config.txt_file_path,
+                        display_size=self.max_minimum_display_size,
+                        display_mode=env_config.display_mode,
+                        random_rotate=env_config.random_rotate,
+                        random_flip=env_config.random_flip,
+                        custom_mission=env_config.custom_mission,
+                        max_steps=env_config.max_steps,
+                    )
+                )
+            else:
+                raise ValueError(f"Unknown environment type: {env_type}")
 
-        # prepare environments
+        # Prepare environments
         eval_env_list = []
         eval_env_name_list = []
         target_env_list = []
         target_env_name_list = []
-
-        # # iterate through task dict to make sequence of environments.
-        train_envs = []
         train_env_steps = []
         train_env_names = []
         vec_train_steps = 0
 
+        # Iterate through task configs to make sequences of training and evaluation environments
         for each_task_config in self.task_configs:
-            # Create new environments for training and evaluation
-            train_env = make_env(each_task_config, is_eval=False)
-            eval_env = make_env(each_task_config, is_eval=True)
 
-            train_envs.append(train_env)
+            # Store training environments and names
             train_env_steps.append(each_task_config.train_total_steps)
             train_env_names.append(each_task_config.name)
 
             # Store evaluation environments and names
-            eval_env_list.append(VecMonitor(DummyVecEnv([lambda: make_env(each_task_config, is_eval=True)])))
+            eval_env_list.append(VecMonitor(DummyVecEnv([lambda: make_env(each_task_config, env_type="eval")])))
             eval_env_name_list.append(each_task_config.name)
 
             vec_train_steps += each_task_config.train_total_steps
 
-        # Create VecMonitor for the training environments
+        # Create VecMonitor for the combined training environments
         vec_train_env = VecMonitor(
-            DummyVecEnv([lambda: make_env(each_task_config, is_eval=False) for each_task_config in self.task_configs]))
+            DummyVecEnv(
+                [lambda: make_env(each_task_config, env_type="train") for each_task_config in self.task_configs]))
 
+        # Iterate through target configs to create target environments
         for each_target_config in self.target_configs:
-            target_env = FullyObsSB3MLPWrapper(
-                CustomEnv(
-                    txt_file_path=each_target_config.txt_file_path,
-                    display_size=self.max_minimum_display_size,
-                    display_mode=each_target_config.display_mode,
-                    random_rotate=each_target_config.random_rotate,
-                    random_flip=each_target_config.random_flip,
-                    custom_mission=each_target_config.custom_mission,
-                    max_steps=each_target_config.max_steps,
-                )
-            )
-            target_env_list.append(VecMonitor(DummyVecEnv([lambda: target_env])))
+            # target_env_list.append(VecMonitor(DummyVecEnv([lambda: make_env(each_target_config, env_type="target")])))
             target_env_name_list.append(each_target_config.name)
+
+        vec_target_env = VecMonitor(
+            DummyVecEnv(
+                [lambda: make_env(each_task_config, env_type="target") for each_task_config in self.target_configs]))
 
         # prepare workspace and log writer
         os.makedirs(session_dir, exist_ok=True)
@@ -211,11 +229,11 @@ class LockPolicyTrainer:
 
         # start re-training by freezing the second half of the net and replace the first half.
         for eval_env, eval_env_name, each_task_config in zip(eval_env_list, eval_env_name_list, task_configs):
-            _model = PPO(CustomActorCriticPolicy, env=vec_train_env, policy_kwargs=self.policy_kwargs, verbose=1)
+            _model = PPO(CustomActorCriticPolicy, env=eval_env, policy_kwargs=self.policy_kwargs, verbose=1)
             _model.policy.mlp_extractor.load_state_dict(model.policy.mlp_extractor.state_dict())
             _model.policy.freeze_mlp_extractor()
             _info_eval_callback = InfoEvalSaveCallback(
-                eval_envs=[eval_env],
+                eval_envs=[vec_target_env],
                 eval_env_names=[eval_env_name + "_policy_frozen"],
                 model=model,
                 model_save_dir=model_save_dir,
@@ -349,15 +367,16 @@ if __name__ == '__main__':
     target_configs = []
 
     # encoder = None  # test non encoding case
-    runner = LockPolicyTrainer(task_configs, target_configs)
-    runner.train(
-        session_dir="./experiments/lock_policy",
-        eval_freq=int(2e3),
-        compute_info_freq=int(2e3),
-        num_eval_episodes=50,
-        eval_deterministic=False,
-        start_time_step=0,
-        iter_gamma=0.999,
-        iter_threshold=1e-5,
-        max_iter=int(1e5),
-    )
+    for i in range(10):
+        runner = LockPolicyTrainer(task_configs, target_configs)
+        runner.train(
+            session_dir=f"./experiments/lock_policy/{i}",
+            eval_freq=int(2e3),
+            compute_info_freq=int(2e3),
+            num_eval_episodes=50,
+            eval_deterministic=False,
+            start_time_step=0,
+            iter_gamma=0.999,
+            iter_threshold=1e-5,
+            max_iter=int(1e5),
+        )

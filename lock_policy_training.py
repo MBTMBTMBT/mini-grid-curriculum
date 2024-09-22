@@ -49,14 +49,14 @@ class LockPolicyTrainer:
         self.eval_configs = eval_configs
         self.target_configs = target_configs
         self.max_minimum_display_size: int = 0
-        self.task_dict: Dict[int, List[TaskConfig]] = dict()
+        self.train_task_dict: Dict[int, List[TaskConfig]] = dict()
 
         # add tasks, find the minimum display size for all
         for each_task_config in train_configs + eval_configs + target_configs:
             if each_task_config.minimum_display_size > self.max_minimum_display_size:
                 self.max_minimum_display_size = each_task_config.minimum_display_size
-            if each_task_config in train_configs + eval_configs:
-                self.task_dict.setdefault(each_task_config.difficulty_level, []).append(each_task_config)
+            if each_task_config in train_configs:
+                self.train_task_dict.setdefault(each_task_config.difficulty_level, []).append(each_task_config)
 
         if policy_kwargs is None:
             self.policy_kwargs = dict(
@@ -106,32 +106,19 @@ class LockPolicyTrainer:
             )
 
         # Prepare environments
+        train_env_list = []
+        train_env_step_list = []
         eval_env_list = []
         eval_env_name_list = []
-        target_env_list = []
         target_env_name_list = []
         train_env_steps = []
         train_env_names = []
-        vec_train_steps = 0
-
-        # Iterate through task configs to make sequences of training and evaluation environments
-        for each_task_config in self.train_configs:
-
-            # Store training environments and names
-            train_env_steps.append(each_task_config.train_total_steps)
-            train_env_names.append(each_task_config.name)
-
-            vec_train_steps += each_task_config.train_total_steps
 
         for each_task_config in self.eval_configs:
             # Store evaluation environments and names
             eval_env_list.append(VecMonitor(DummyVecEnv([lambda: make_env(each_task_config)])))
             eval_env_name_list.append(each_task_config.name)
 
-        # Create VecMonitor for the combined training environments
-        vec_train_env = VecMonitor(
-            DummyVecEnv(
-                [lambda: make_env(each_task_config) for each_task_config in self.train_configs]))
 
         # Iterate through target configs to create target environments
         for each_target_config in self.target_configs:
@@ -142,6 +129,27 @@ class LockPolicyTrainer:
             DummyVecEnv(
                 [lambda: make_env(each_task_config) for each_task_config in self.target_configs]))
 
+        for difficulty_level in sorted(self.train_task_dict.keys()):
+            train_tasks = self.train_task_dict[difficulty_level]
+            vec_train_steps = 0
+
+            # Iterate through task configs to make sequences of training and evaluation environments
+            for each_task_config in train_tasks:
+
+                # Store training environments and names
+                train_env_steps.append(each_task_config.train_total_steps)
+                train_env_names.append(each_task_config.name)
+
+                vec_train_steps += each_task_config.train_total_steps
+
+            # Create VecMonitor for the combined training environments
+            vec_train_env = VecMonitor(
+                DummyVecEnv(
+                    [lambda: make_env(each_task_config) for each_task_config in train_tasks]))
+
+            train_env_list.append(vec_train_env)
+            train_env_step_list.append(vec_train_steps)
+
         # prepare workspace and log writer
         os.makedirs(session_dir, exist_ok=True)
         log_dir = os.path.join(session_dir, "logs")
@@ -150,38 +158,46 @@ class LockPolicyTrainer:
         os.makedirs(model_save_dir, exist_ok=True)
         log_writer = SummaryWriter(log_dir)
 
-        if load_path and os.path.exists(load_path):
-            model = PPO.load(load_path, env=vec_train_env)
-        else:
-            model = PPO(CustomActorCriticPolicy, env=vec_train_env, policy_kwargs=self.policy_kwargs, verbose=1)
-            print("Initialized new model.")
+        for i in range(len(train_env_list)):
+            print(f"Training stage [{i + 1} / {len(train_env_list)}]:")
+            print(f"Time step starts from: {start_time_step}...")
 
-        info_eval_callback = InfoEvalSaveCallback(
-            eval_envs=eval_env_list,
-            eval_env_names=eval_env_name_list,
-            model=model,
-            model_save_dir=model_save_dir,
-            model_save_name=f"saved_model",
-            log_writer=log_writer,
-            eval_freq=eval_freq,
-            compute_info_freq=compute_info_freq,
-            n_eval_episodes=num_eval_episodes,
-            deterministic=eval_deterministic,
-            verbose=1,
-            start_timestep=start_time_step,
-            iter_gamma=iter_gamma,
-            iter_threshold=iter_threshold,
-            max_iter=max_iter,
-        )
+            # get environment for this round
+            env = train_env_list[i]
+            steps = train_env_step_list[i]
 
-        model.policy.features_extractor.unfreeze()
-        model.policy.unfreeze_mlp_extractor()
+            if load_path and os.path.exists(load_path):
+                model = PPO.load(load_path, env=env)
+            else:
+                model = PPO(CustomActorCriticPolicy, env=env, policy_kwargs=self.policy_kwargs, verbose=1)
+                print("Initialized new model.")
 
-        # callback_list = CallbackList(callbacks=[target_callback, eval_callback])
-        callback_list = CallbackList(callbacks=[info_eval_callback,])
+            info_eval_callback = InfoEvalSaveCallback(
+                eval_envs=eval_env_list,
+                eval_env_names=eval_env_name_list,
+                model=model,
+                model_save_dir=model_save_dir,
+                model_save_name=f"saved_model",
+                log_writer=log_writer,
+                eval_freq=eval_freq,
+                compute_info_freq=compute_info_freq,
+                n_eval_episodes=num_eval_episodes,
+                deterministic=eval_deterministic,
+                verbose=1,
+                start_timestep=start_time_step,
+                iter_gamma=iter_gamma,
+                iter_threshold=iter_threshold,
+                max_iter=max_iter,
+            )
 
-        # train
-        model.learn(total_timesteps=vec_train_steps, callback=callback_list, progress_bar=True)
+            model.policy.features_extractor.unfreeze()
+            model.policy.unfreeze_mlp_extractor()
+
+            # callback_list = CallbackList(callbacks=[target_callback, eval_callback])
+            callback_list = CallbackList(callbacks=[info_eval_callback,])
+
+            # train
+            model.learn(total_timesteps=steps, callback=callback_list, progress_bar=True)
 
         # start re-training by freezing the second half of the net and replace the first half.
         for eval_env, eval_env_name, each_task_config in zip(eval_env_list, eval_env_name_list, train_configs):
@@ -243,7 +259,6 @@ if __name__ == '__main__':
     config.max_steps = 50
     config.start_pos = (1, 1)
     config.start_dir = 1
-    config.difficulty_level = 0
     eval_configs.append(config)
 
     config = TaskConfig()
@@ -270,7 +285,6 @@ if __name__ == '__main__':
     config.max_steps = 50
     config.start_pos = (1, 1)
     config.start_dir = 1
-    config.difficulty_level = 1
     eval_configs.append(config)
 
     config = TaskConfig()
@@ -297,7 +311,6 @@ if __name__ == '__main__':
     config.max_steps = 50
     config.start_pos = (1, 1)
     config.start_dir = 1
-    config.difficulty_level = 2
     eval_configs.append(config)
 
     config = TaskConfig()
@@ -336,7 +349,7 @@ if __name__ == '__main__':
             session_dir=f"./experiments/lock_policy/{i}",
             eval_freq=int(10e3),
             compute_info_freq=int(10e3),
-            num_eval_episodes=50,
+            num_eval_episodes=10,
             eval_deterministic=False,
             start_time_step=0,
             iter_gamma=0.999,

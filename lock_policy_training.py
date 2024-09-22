@@ -62,10 +62,10 @@ class LockPolicyTrainer:
             self.policy_kwargs = dict(
                 features_extractor_class=MLPEncoderExtractor,  # Use the custom encoder extractor
                 features_extractor_kwargs=dict(
-                    net_arch=[dict(pi=[64, 64], vf=[64, 64])],  # Custom layer sizes
+                    net_arch=[128, 64],  # Custom layer sizes
                     activation_fn=nn.LeakyReLU  # Activation function
                 ),
-                net_arch=[128, 64],  # Policy and value network architecture
+                net_arch=[dict(pi=[64, 64], vf=[64, 64])],  # Policy and value network architecture
                 activation_fn=nn.LeakyReLU,
             )
         else:
@@ -315,11 +315,12 @@ if __name__ == '__main__':
             policy_kwargs=dict(
                 features_extractor_class=TransformerEncoderExtractor,  # Use the custom encoder extractor
                 features_extractor_kwargs=dict(
-                    net_arch=[512, 512, 64],  # Custom layer sizes
+                    net_arch=[64],  # Custom layer sizes
+                    num_transformer_layers=2,
                     n_heads=8,
                     activation_fn=nn.LeakyReLU  # Activation function
                 ),
-                net_arch=[dict(pi=[64, 64], vf=[64, 64])],  # Policy and value network architecture
+                net_arch=dict(pi=[64, 64], vf=[64, 64]),  # Policy and value network architecture
                 activation_fn=nn.LeakyReLU,
             )
         )

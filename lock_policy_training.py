@@ -228,7 +228,7 @@ if __name__ == '__main__':
     config.random_rotate = True
     config.random_flip = True
     config.max_steps = 500
-    config.train_total_steps = 10e4
+    config.train_total_steps = 20e4
     config.difficulty_level = 0
     train_configs.append(config)
 
@@ -253,7 +253,7 @@ if __name__ == '__main__':
     config.random_rotate = True
     config.random_flip = True
     config.max_steps = 500
-    config.train_total_steps = 10e4
+    config.train_total_steps = 20e4
     config.difficulty_level = 1
     train_configs.append(config)
 
@@ -278,7 +278,7 @@ if __name__ == '__main__':
     config.random_rotate = True
     config.random_flip = True
     config.max_steps = 500
-    config.train_total_steps = 10e4
+    config.train_total_steps = 20e4
     config.difficulty_level = 2
     train_configs.append(config)
 
@@ -315,11 +315,11 @@ if __name__ == '__main__':
             policy_kwargs=dict(
                 features_extractor_class=TransformerEncoderExtractor,  # Use the custom encoder extractor
                 features_extractor_kwargs=dict(
-                    net_arch=[dict(pi=[64, 64], vf=[64, 64])],  # Custom layer sizes
+                    net_arch=[512, 512, 64],  # Custom layer sizes
+                    n_heads=8,
                     activation_fn=nn.LeakyReLU  # Activation function
                 ),
-                net_arch=[512, 512, 64],  # Policy and value network architecture
-                n_heads=8,
+                net_arch=[dict(pi=[64, 64], vf=[64, 64])],  # Policy and value network architecture
                 activation_fn=nn.LeakyReLU,
             )
         )

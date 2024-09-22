@@ -54,20 +54,23 @@ class LockPolicyTrainer:
         self.eval_configs = eval_configs
         self.target_configs = target_configs
         self.max_minimum_display_size: int = 0
+        self.task_dict: Dict[int, List[TaskConfig]] = dict()
 
         # add tasks, find the minimum display size for all
         for each_task_config in train_configs + eval_configs + target_configs:
             if each_task_config.minimum_display_size > self.max_minimum_display_size:
                 self.max_minimum_display_size = each_task_config.minimum_display_size
+            if each_task_config in train_configs + eval_configs:
+                self.task_dict.setdefault(each_task_config.difficulty_level, []).append(each_task_config)
 
         self.policy_kwargs = dict(
             features_extractor_class=CustomEncoderExtractor,  # Use the custom encoder extractor
             features_extractor_kwargs=dict(
                 net_arch=feature_encoder_net_arch,  # Custom layer sizes
-                activation_fn=nn.ReLU  # Activation function
+                activation_fn=nn.LeakyReLU  # Activation function
             ),
             net_arch=mlp_net_arch,  # Policy and value network architecture
-            activation_fn=nn.ReLU,
+            activation_fn=nn.LeakyReLU,
         )
 
     def train(
@@ -307,7 +310,13 @@ if __name__ == '__main__':
 
     # encoder = None  # test non encoding case
     for i in range(10):
-        runner = LockPolicyTrainer(train_configs, eval_configs, target_configs)
+        runner = LockPolicyTrainer(
+            train_configs,
+            eval_configs,
+            target_configs,
+            mlp_net_arch=[dict(pi=[64, 64], vf=[64, 64])],
+            feature_encoder_net_arch=[512, 512, 64],
+        )
         runner.train(
             session_dir=f"./experiments/lock_policy/{i}",
             eval_freq=int(10e3),

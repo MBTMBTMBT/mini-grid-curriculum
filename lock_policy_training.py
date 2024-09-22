@@ -8,7 +8,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 from binary_state_representation.binary2binaryautoencoder import Binary2BinaryEncoder, Binary2BinaryFeatureNet
 from callbacks import EvalCallback, EvalSaveCallback, InfoEvalSaveCallback
-from customPPO import CustomEncoderExtractor, CustomActorCriticPolicy
+from customPPO import MLPEncoderExtractor, CustomActorCriticPolicy, TransformerEncoderExtractor
 from customize_minigrid.custom_env import CustomEnv
 from stable_baselines3.common.vec_env import DummyVecEnv, VecMonitor
 from stable_baselines3.common.callbacks import CallbackList
@@ -43,13 +43,8 @@ class LockPolicyTrainer:
             train_configs: List[TaskConfig],
             eval_configs: List[TaskConfig],
             target_configs: List[TaskConfig],
-            feature_encoder_net_arch=None,
-            mlp_net_arch=None,
+            policy_kwargs=None,
     ):
-        if mlp_net_arch is None:
-            mlp_net_arch = [dict(pi=[64, 64], vf=[64, 64])]
-        if feature_encoder_net_arch is None:
-            feature_encoder_net_arch = [128, 64]
         self.train_configs = train_configs
         self.eval_configs = eval_configs
         self.target_configs = target_configs
@@ -63,15 +58,18 @@ class LockPolicyTrainer:
             if each_task_config in train_configs + eval_configs:
                 self.task_dict.setdefault(each_task_config.difficulty_level, []).append(each_task_config)
 
-        self.policy_kwargs = dict(
-            features_extractor_class=CustomEncoderExtractor,  # Use the custom encoder extractor
-            features_extractor_kwargs=dict(
-                net_arch=feature_encoder_net_arch,  # Custom layer sizes
-                activation_fn=nn.LeakyReLU  # Activation function
-            ),
-            net_arch=mlp_net_arch,  # Policy and value network architecture
-            activation_fn=nn.LeakyReLU,
-        )
+        if policy_kwargs is None:
+            self.policy_kwargs = dict(
+                features_extractor_class=MLPEncoderExtractor,  # Use the custom encoder extractor
+                features_extractor_kwargs=dict(
+                    net_arch=[dict(pi=[64, 64], vf=[64, 64])],  # Custom layer sizes
+                    activation_fn=nn.LeakyReLU  # Activation function
+                ),
+                net_arch=[128, 64],  # Policy and value network architecture
+                activation_fn=nn.LeakyReLU,
+            )
+        else:
+            self.policy_kwargs = policy_kwargs
 
     def train(
             self,
@@ -314,8 +312,16 @@ if __name__ == '__main__':
             train_configs,
             eval_configs,
             target_configs,
-            mlp_net_arch=[dict(pi=[64, 64], vf=[64, 64])],
-            feature_encoder_net_arch=[512, 512, 64],
+            policy_kwargs=dict(
+                features_extractor_class=TransformerEncoderExtractor,  # Use the custom encoder extractor
+                features_extractor_kwargs=dict(
+                    net_arch=[dict(pi=[64, 64], vf=[64, 64])],  # Custom layer sizes
+                    activation_fn=nn.LeakyReLU  # Activation function
+                ),
+                net_arch=[512, 512, 64],  # Policy and value network architecture
+                n_heads=8,
+                activation_fn=nn.LeakyReLU,
+            )
         )
         runner.train(
             session_dir=f"./experiments/lock_policy/{i}",

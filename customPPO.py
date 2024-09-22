@@ -13,7 +13,7 @@ from torch.distributions import Categorical, Normal
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 
 
-class CustomEncoderExtractor(BaseFeaturesExtractor):
+class MLPEncoderExtractor(BaseFeaturesExtractor):
     """
     A custom feature extractor that applies a neural network (MLP) as an encoder.
     It also supports freezing/unfreezing the network.
@@ -70,6 +70,82 @@ class CustomEncoderExtractor(BaseFeaturesExtractor):
             param.requires_grad = True
 
 
+class TransformerEncoderExtractor(BaseFeaturesExtractor):
+    """
+    A custom feature extractor that applies a Transformer encoder.
+    It supports freezing/unfreezing the network and allows the architecture to be specified via net_arch.
+
+    :param observation_space: (gym.Space) The observation space of the environment
+    :param net_arch: (list of int) The architecture of the Transformer encoder layers (list of layer sizes)
+    :param n_heads: (int) Number of attention heads in the Transformer
+    :param activation_fn: (nn.Module) The activation function to use (ReLU, Tanh, etc.)
+    """
+
+    def __init__(self, observation_space: gym.spaces.Box, net_arch=None, n_heads=8, activation_fn=nn.ReLU):
+        # Initialize the base feature extractor with the flattened observation size
+        super().__init__(observation_space, th.prod(th.tensor(observation_space.shape)).item())
+
+        # If no architecture is specified, use a default one
+        if net_arch is None:
+            net_arch = [128, 128]
+
+        # Use the sequence length as the initial d_model
+        self.seq_length = self.features_dim
+        d_model = self.seq_length  # Set the initial d_model to match the input sequence length
+
+        # Build Transformer encoder layers based on the net_arch
+        self.transformer_layers = nn.ModuleList()
+        for layer_size in net_arch:
+            encoder_layer = nn.TransformerEncoderLayer(d_model=d_model, nhead=n_heads, activation=activation_fn())
+            self.transformer_layers.append(nn.TransformerEncoder(encoder_layer, num_layers=1))
+            d_model = layer_size  # Update d_model for the next layer
+
+        # Define the output layer to map back to the desired feature dimension
+        self.output_layer = nn.Linear(net_arch[-1], net_arch[-1])
+
+        # Update features_dim to the final layer size
+        self._features_dim = net_arch[-1]
+
+        # Initially, the network is not frozen
+        self.frozen = False
+
+    def forward(self, observations: th.Tensor) -> th.Tensor:
+        # Flatten the input observations
+        observations = observations.view(observations.size(0), -1)
+
+        # Ensure input observations are treated directly without an embedding layer
+        # Reshape to [sequence_length, batch_size, d_model] for Transformer processing
+        embedded = observations.unsqueeze(0).permute(1, 0, 2)
+
+        # Pass through each Transformer encoder layer
+        for transformer_layer in self.transformer_layers:
+            embedded = transformer_layer(embedded)
+
+        # Squeeze the sequence dimension
+        encoded = embedded.squeeze(0)
+
+        # Apply the final output layer
+        output = self.output_layer(encoded)
+
+        return output
+
+    def freeze(self):
+        """
+        Freeze the parameters of the encoder, preventing them from being updated during training.
+        """
+        self.frozen = True
+        for param in self.parameters():
+            param.requires_grad = False
+
+    def unfreeze(self):
+        """
+        Unfreeze the parameters of the encoder, allowing them to be updated during training.
+        """
+        self.frozen = False
+        for param in self.parameters():
+            param.requires_grad = True
+
+
 class CustomActorCriticPolicy(ActorCriticPolicy):
     """
     A custom ActorCriticPolicy that allows freezing/unfreezing the mlp_extractor.
@@ -107,7 +183,7 @@ if __name__ == '__main__':
 
     # Define policy kwargs
     policy_kwargs = dict(
-        features_extractor_class=CustomEncoderExtractor,  # Use the custom encoder extractor
+        features_extractor_class=MLPEncoderExtractor,  # Use the custom encoder extractor
         features_extractor_kwargs=dict(
             net_arch=[128, 64],  # Custom layer sizes
             activation_fn=nn.ReLU  # Activation function

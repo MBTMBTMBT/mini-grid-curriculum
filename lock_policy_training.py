@@ -1,5 +1,5 @@
 import os
-from typing import Dict, List
+from typing import Dict, List, Tuple, Optional
 
 import torch
 from stable_baselines3 import PPO
@@ -26,40 +26,22 @@ class TaskConfig:
 
         self.minimum_display_size: int = 0
 
-        self.train_display_mode: str = "random"
-        self.train_random_rotate: bool = True
-        self.train_random_flip: bool = True
-        self.train_max_steps: int = 0
-        self.train_total_steps: int = 0
-
-        self.eval_display_mode: str = "middle"
-        self.eval_random_rotate: bool = False
-        self.eval_random_flip: bool = False
-        self.eval_max_steps: int = 0
-
-        self.difficulty_level: int = 0
-
-
-class TargetConfig:
-    def __init__(self):
-        self.name = ""
-
-        self.txt_file_path: str = ""
-        self.custom_mission: str = ""
-
-        self.minimum_display_size: int = 0
-
-        self.display_mode: str = "middle"
+        self.display_mode: str = "random"
         self.random_rotate: bool = False
         self.random_flip: bool = False
         self.max_steps: int = 0
+        self.start_pos: Tuple[int, int] or None
+        self.start_dir: Optional[int]
+
+        self.train_total_steps: int = 0
+        self.difficulty_level: int = 0
 
 
 class LockPolicyTrainer:
     def __init__(
             self,
             task_configs: List[TaskConfig],
-            target_configs: List[TargetConfig],
+            target_configs: List[TaskConfig],
             feature_encoder_net_arch=None,
             mlp_net_arch=None,
     ):
@@ -103,7 +85,7 @@ class LockPolicyTrainer:
             max_iter: int = 1e5,
     ):
         # Helper function to create a new environment instance for training, evaluation, or target
-        def make_env(env_config, env_type="train"):
+        def make_env(env_config):
             """
             Create a new environment instance based on the configuration and environment type.
 
@@ -111,44 +93,17 @@ class LockPolicyTrainer:
             :param env_type: A string indicating the type of environment: "train", "eval", or "target"
             :return: A new environment instance
             """
-            if env_type == "train":
-                return FullyObsSB3MLPWrapper(
-                    CustomEnv(
-                        txt_file_path=env_config.txt_file_path,
-                        display_size=self.max_minimum_display_size,
-                        display_mode=env_config.train_display_mode,
-                        random_rotate=env_config.train_random_rotate,
-                        random_flip=env_config.train_random_flip,
-                        custom_mission=env_config.custom_mission,
-                        max_steps=env_config.train_max_steps,
-                    )
+            return FullyObsSB3MLPWrapper(
+                CustomEnv(
+                    txt_file_path=env_config.txt_file_path,
+                    display_size=self.max_minimum_display_size,
+                    display_mode=env_config.display_mode,
+                    random_rotate=env_config.random_rotate,
+                    random_flip=env_config.random_flip,
+                    custom_mission=env_config.custom_mission,
+                    max_steps=env_config.max_steps,
                 )
-            elif env_type == "eval":
-                return FullyObsSB3MLPWrapper(
-                    CustomEnv(
-                        txt_file_path=env_config.txt_file_path,
-                        display_size=self.max_minimum_display_size,
-                        display_mode=env_config.eval_display_mode,
-                        random_rotate=env_config.eval_random_rotate,
-                        random_flip=env_config.eval_random_flip,
-                        custom_mission=env_config.custom_mission,
-                        max_steps=env_config.eval_max_steps,
-                    )
-                )
-            elif env_type == "target":
-                return FullyObsSB3MLPWrapper(
-                    CustomEnv(
-                        txt_file_path=env_config.txt_file_path,
-                        display_size=self.max_minimum_display_size,
-                        display_mode=env_config.display_mode,
-                        random_rotate=env_config.random_rotate,
-                        random_flip=env_config.random_flip,
-                        custom_mission=env_config.custom_mission,
-                        max_steps=env_config.max_steps,
-                    )
-                )
-            else:
-                raise ValueError(f"Unknown environment type: {env_type}")
+            )
 
         # Prepare environments
         eval_env_list = []
@@ -167,7 +122,7 @@ class LockPolicyTrainer:
             train_env_names.append(each_task_config.name)
 
             # Store evaluation environments and names
-            eval_env_list.append(VecMonitor(DummyVecEnv([lambda: make_env(each_task_config, env_type="eval")])))
+            eval_env_list.append(VecMonitor(DummyVecEnv([lambda: make_env(each_task_config)])))
             eval_env_name_list.append(each_task_config.name)
 
             vec_train_steps += each_task_config.train_total_steps
@@ -175,7 +130,7 @@ class LockPolicyTrainer:
         # Create VecMonitor for the combined training environments
         vec_train_env = VecMonitor(
             DummyVecEnv(
-                [lambda: make_env(each_task_config, env_type="train") for each_task_config in self.task_configs]))
+                [lambda: make_env(each_task_config) for each_task_config in self.task_configs]))
 
         # Iterate through target configs to create target environments
         for each_target_config in self.target_configs:
@@ -184,7 +139,7 @@ class LockPolicyTrainer:
 
         vec_target_env = VecMonitor(
             DummyVecEnv(
-                [lambda: make_env(each_task_config, env_type="target") for each_task_config in self.target_configs]))
+                [lambda: make_env(each_task_config) for each_task_config in self.target_configs]))
 
         # prepare workspace and log writer
         os.makedirs(session_dir, exist_ok=True)

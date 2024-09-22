@@ -30,8 +30,8 @@ class TaskConfig:
         self.random_rotate: bool = False
         self.random_flip: bool = False
         self.max_steps: int = 0
-        self.start_pos: Tuple[int, int] or None
-        self.start_dir: Optional[int]
+        self.start_pos: Tuple[int, int] or None = None
+        self.start_dir: Optional[int] = None
 
         self.train_total_steps: int = 0
         self.difficulty_level: int = 0
@@ -241,6 +241,8 @@ if __name__ == '__main__':
     config.random_rotate = False
     config.random_flip = False
     config.max_steps = 50
+    config.start_pos = (1, 1)
+    config.start_dir = 1
     config.difficulty_level = 0
     eval_configs.append(config)
 
@@ -266,6 +268,8 @@ if __name__ == '__main__':
     config.random_rotate = False
     config.random_flip = False
     config.max_steps = 50
+    config.start_pos = (1, 1)
+    config.start_dir = 1
     config.difficulty_level = 1
     eval_configs.append(config)
 
@@ -291,6 +295,8 @@ if __name__ == '__main__':
     config.random_rotate = False
     config.random_flip = False
     config.max_steps = 50
+    config.start_pos = (1, 1)
+    config.start_dir = 1
     config.difficulty_level = 2
     eval_configs.append(config)
 
@@ -303,6 +309,8 @@ if __name__ == '__main__':
     config.random_flip = True
     config.display_mode = "middle"
     config.max_steps = 50
+    config.start_pos = (1, 1)
+    config.start_dir = 1
 
     target_configs = [config]
 
@@ -315,12 +323,12 @@ if __name__ == '__main__':
             policy_kwargs=dict(
                 features_extractor_class=TransformerEncoderExtractor,  # Use the custom encoder extractor
                 features_extractor_kwargs=dict(
-                    net_arch=[64],  # Custom layer sizes
-                    num_transformer_layers=2,
-                    n_heads=8,
+                    net_arch=[512, 64],  # Custom layer sizes
+                    num_transformer_layers=4,
+                    n_heads=4,
                     activation_fn=nn.LeakyReLU  # Activation function
                 ),
-                net_arch=dict(pi=[64, 64], vf=[64, 64]),  # Policy and value network architecture
+                net_arch=dict(pi=[64, 512, 512], vf=[64, 512, 512]),  # Policy and value network architecture
                 activation_fn=nn.LeakyReLU,
             )
         )

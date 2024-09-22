@@ -40,7 +40,8 @@ class TaskConfig:
 class LockPolicyTrainer:
     def __init__(
             self,
-            task_configs: List[TaskConfig],
+            train_configs: List[TaskConfig],
+            eval_configs: List[TaskConfig],
             target_configs: List[TaskConfig],
             feature_encoder_net_arch=None,
             mlp_net_arch=None,
@@ -49,17 +50,15 @@ class LockPolicyTrainer:
             mlp_net_arch = [dict(pi=[64, 64], vf=[64, 64])]
         if feature_encoder_net_arch is None:
             feature_encoder_net_arch = [128, 64]
-        self.task_configs = task_configs
+        self.train_configs = train_configs
+        self.eval_configs = eval_configs
         self.target_configs = target_configs
         self.max_minimum_display_size: int = 0
 
         # add tasks, find the minimum display size for all
-        for each_task_config in task_configs:
+        for each_task_config in train_configs + eval_configs + target_configs:
             if each_task_config.minimum_display_size > self.max_minimum_display_size:
                 self.max_minimum_display_size = each_task_config.minimum_display_size
-        for each_target_config in target_configs:
-            if each_target_config.minimum_display_size > self.max_minimum_display_size:
-                self.max_minimum_display_size = each_target_config.minimum_display_size
 
         self.policy_kwargs = dict(
             features_extractor_class=CustomEncoderExtractor,  # Use the custom encoder extractor
@@ -115,22 +114,23 @@ class LockPolicyTrainer:
         vec_train_steps = 0
 
         # Iterate through task configs to make sequences of training and evaluation environments
-        for each_task_config in self.task_configs:
+        for each_task_config in self.train_configs:
 
             # Store training environments and names
             train_env_steps.append(each_task_config.train_total_steps)
             train_env_names.append(each_task_config.name)
 
+            vec_train_steps += each_task_config.train_total_steps
+
+        for each_task_config in self.eval_configs:
             # Store evaluation environments and names
             eval_env_list.append(VecMonitor(DummyVecEnv([lambda: make_env(each_task_config)])))
             eval_env_name_list.append(each_task_config.name)
 
-            vec_train_steps += each_task_config.train_total_steps
-
         # Create VecMonitor for the combined training environments
         vec_train_env = VecMonitor(
             DummyVecEnv(
-                [lambda: make_env(each_task_config) for each_task_config in self.task_configs]))
+                [lambda: make_env(each_task_config) for each_task_config in self.train_configs]))
 
         # Iterate through target configs to create target environments
         for each_target_config in self.target_configs:
@@ -183,7 +183,7 @@ class LockPolicyTrainer:
         model.learn(total_timesteps=vec_train_steps, callback=callback_list, progress_bar=True)
 
         # start re-training by freezing the second half of the net and replace the first half.
-        for eval_env, eval_env_name, each_task_config in zip(eval_env_list, eval_env_name_list, task_configs):
+        for eval_env, eval_env_name, each_task_config in zip(eval_env_list, eval_env_name_list, train_configs):
             _model = PPO(CustomActorCriticPolicy, env=eval_env, policy_kwargs=self.policy_kwargs, verbose=1)
             _model.policy.mlp_extractor.load_state_dict(model.policy.mlp_extractor.state_dict())
             _model.policy.freeze_mlp_extractor()
@@ -215,111 +215,85 @@ class LockPolicyTrainer:
 
 
 if __name__ == '__main__':
-    task_configs = []
+    train_configs = []
+    eval_configs = []
 
     config = TaskConfig()
     config.name = "short_corridor"
     config.txt_file_path = r"./maps/short_corridor.txt"
     config.custom_mission = "reach the goal"
     config.minimum_display_size = 6
-    config.train_display_mode = "random"
-    config.train_random_rotate = True
-    config.train_random_flip = True
-    config.train_max_steps = 500
+    config.display_mode = "random"
+    config.random_rotate = True
+    config.random_flip = True
+    config.max_steps = 500
     config.train_total_steps = 10e4
-    config.eval_display_mode = "middle"
-    config.eval_random_rotate = False
-    config.eval_random_flip = False
-    config.eval_max_steps = 50
     config.difficulty_level = 0
-    task_configs.append(config)
+    train_configs.append(config)
+
+    config = TaskConfig()
+    config.name = "short_corridor"
+    config.txt_file_path = r"./maps/short_corridor.txt"
+    config.custom_mission = "reach the goal"
+    config.minimum_display_size = 6
+    config.display_mode = "middle"
+    config.random_rotate = False
+    config.random_flip = False
+    config.max_steps = 50
+    config.difficulty_level = 0
+    eval_configs.append(config)
 
     config = TaskConfig()
     config.name = "long_corridor"
     config.txt_file_path = r"./maps/long_corridor.txt"
     config.custom_mission = "reach the goal"
     config.minimum_display_size = 9
-    config.train_display_mode = "random"
-    config.train_random_rotate = True
-    config.train_random_flip = True
-    config.train_max_steps = 500
+    config.display_mode = "random"
+    config.random_rotate = True
+    config.random_flip = True
+    config.max_steps = 500
     config.train_total_steps = 10e4
-    config.eval_display_mode = "middle"
-    config.eval_random_rotate = False
-    config.eval_random_flip = False
-    config.eval_max_steps = 50
     config.difficulty_level = 1
-    task_configs.append(config)
+    train_configs.append(config)
+
+    config = TaskConfig()
+    config.name = "long_corridor"
+    config.txt_file_path = r"./maps/long_corridor.txt"
+    config.custom_mission = "reach the goal"
+    config.minimum_display_size = 9
+    config.display_mode = "middle"
+    config.random_rotate = False
+    config.random_flip = False
+    config.max_steps = 50
+    config.difficulty_level = 1
+    eval_configs.append(config)
 
     config = TaskConfig()
     config.name = "extra_long_corridor"
     config.txt_file_path = r"./maps/extra_long_corridor.txt"
     config.custom_mission = "reach the goal"
     config.minimum_display_size = 11
-    config.train_display_mode = "random"
-    config.train_random_rotate = True
-    config.train_random_flip = True
-    config.train_max_steps = 500
+    config.display_mode = "random"
+    config.random_rotate = True
+    config.random_flip = True
+    config.max_steps = 500
     config.train_total_steps = 10e4
-    config.eval_display_mode = "middle"
-    config.eval_random_rotate = False
-    config.eval_random_flip = False
-    config.eval_max_steps = 50
-    config.difficulty_level = 1
-    task_configs.append(config)
+    config.difficulty_level = 2
+    train_configs.append(config)
 
-    # config = TaskConfig()
-    # config.name = "square_space"
-    # config.txt_file_path = r"./maps/square_space.txt"
-    # config.custom_mission = "reach the goal"
-    # config.minimum_display_size = 7
-    # config.train_display_mode = "random"
-    # config.train_random_rotate = True
-    # config.train_random_flip = True
-    # config.train_max_steps = 1000
-    # config.train_total_steps = 5e5
-    # config.eval_display_mode = "middle"
-    # config.eval_random_rotate = False
-    # config.eval_random_flip = False
-    # config.eval_max_steps = 50
-    # config.difficulty_level = 2
-    # task_configs.append(config)
-    #
-    # config = TaskConfig()
-    # config.name = "small_maze"
-    # config.txt_file_path = r"./maps/small_maze.txt"
-    # config.custom_mission = "reach the goal"
-    # config.minimum_display_size = 7
-    # config.train_display_mode = "random"
-    # config.train_random_rotate = True
-    # config.train_random_flip = True
-    # config.train_max_steps = 1000
-    # config.train_total_steps = 5e5
-    # config.eval_display_mode = "middle"
-    # config.eval_random_rotate = False
-    # config.eval_random_flip = False
-    # config.eval_max_steps = 50
-    # config.difficulty_level = 3
-    # task_configs.append(config)
-    #
-    # config = TaskConfig()
-    # config.name = "big_maze"
-    # config.txt_file_path = r"./maps/big_maze.txt"
-    # config.custom_mission = "reach the goal"
-    # config.minimum_display_size = 13
-    # config.train_display_mode = "random"
-    # config.train_random_rotate = True
-    # config.train_random_flip = True
-    # config.train_max_steps = 2000
-    # config.train_total_steps = 10e5
-    # config.eval_display_mode = "middle"
-    # config.eval_random_rotate = False
-    # config.eval_random_flip = False
-    # config.eval_max_steps = 100
-    # config.difficulty_level = 4
-    # task_configs.append(config)
+    config = TaskConfig()
+    config.name = "extra_long_corridor"
+    config.txt_file_path = r"./maps/extra_long_corridor.txt"
+    config.custom_mission = "reach the goal"
+    config.minimum_display_size = 11
+    config.display_mode = "middle"
+    config.random_rotate = False
+    config.random_flip = False
+    config.max_steps = 50
+    config.difficulty_level = 2
+    eval_configs.append(config)
 
-    config = TargetConfig()
+    config = TaskConfig()
     config.name = "extra_long_corridor"
     config.txt_file_path = r"./maps/extra_long_corridor.txt"
     config.custom_mission = "reach the goal"
@@ -333,11 +307,11 @@ if __name__ == '__main__':
 
     # encoder = None  # test non encoding case
     for i in range(10):
-        runner = LockPolicyTrainer(task_configs, target_configs)
+        runner = LockPolicyTrainer(train_configs, eval_configs, target_configs)
         runner.train(
             session_dir=f"./experiments/lock_policy/{i}",
-            eval_freq=int(2e3),
-            compute_info_freq=int(2e3),
+            eval_freq=int(10e3),
+            compute_info_freq=int(10e3),
             num_eval_episodes=50,
             eval_deterministic=False,
             start_time_step=0,

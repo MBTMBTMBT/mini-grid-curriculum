@@ -270,7 +270,7 @@ if __name__ == '__main__':
     config.random_rotate = True
     config.random_flip = True
     config.max_steps = 500
-    config.train_total_steps = 10e4
+    config.train_total_steps = 20e4
     config.difficulty_level = 4
     train_configs.append(config)
 
@@ -299,7 +299,7 @@ if __name__ == '__main__':
     config.random_rotate = True
     config.random_flip = True
     config.max_steps = 500
-    config.train_total_steps = 20e4
+    config.train_total_steps = 50e4
     config.difficulty_level = 5
     train_configs.append(config)
 
@@ -338,7 +338,7 @@ if __name__ == '__main__':
     config.random_rotate = True
     config.random_flip = True
     config.max_steps = 500
-    config.train_total_steps = 40e4
+    config.train_total_steps = 50e4
     config.difficulty_level = 6
     train_configs.append(config)
 
@@ -371,81 +371,12 @@ if __name__ == '__main__':
     config.txt_file_path = r"./maps/6-4.txt"
     eval_configs.append(config)
 
-    ##################################################################
-    config = TaskConfig()
-    config.name = "7"
-    config.txt_file_path = None
-    config.rand_gen_shape = (7, 7)
-    config.custom_mission = "reach the goal"
-    config.minimum_display_size = 7
-    config.display_mode = "random"
-    config.random_rotate = True
-    config.random_flip = True
-    config.max_steps = 500
-    config.train_total_steps = 50e4
-    config.difficulty_level = 7
-    train_configs.append(config)
-
-    config = TaskConfig()
-    config.name = "7-1"
-    config.txt_file_path = r"./maps/7-1.txt"
-    config.rand_gen_shape = None
-    config.custom_mission = "reach the goal"
-    config.minimum_display_size = 7
-    config.display_mode = "middle"
-    config.random_rotate = False
-    config.random_flip = False
-    config.max_steps = 50
-    config.start_pos = (1, 1)
-    config.start_dir = 1
-    eval_configs.append(config)
-
-    config = TaskConfig().clone(config)
-    config.name = "7-2"
-    config.txt_file_path = r"./maps/7-2.txt"
-    eval_configs.append(config)
-
-    config = TaskConfig().clone(config)
-    config.name = "7-3"
-    config.txt_file_path = r"./maps/7-3.txt"
-    eval_configs.append(config)
-
-    config = TaskConfig().clone(config)
-    config.name = "7-4"
-    config.txt_file_path = r"./maps/7-4.txt"
-    eval_configs.append(config)
-
-    config = TaskConfig().clone(config)
-    config.name = "7-5"
-    config.txt_file_path = r"./maps/7-5.txt"
-    eval_configs.append(config)
-
-    config = TaskConfig().clone(config)
-    config.name = "7-6"
-    config.txt_file_path = r"./maps/7-6.txt"
-    eval_configs.append(config)
-
-    ##################################################################
-    config = TaskConfig()
-    config.name = "8"
-    config.txt_file_path = None
-    config.rand_gen_shape = (8, 8)
-    config.custom_mission = "reach the goal"
-    config.minimum_display_size = 8
-    config.display_mode = "random"
-    config.random_rotate = True
-    config.random_flip = True
-    config.max_steps = 500
-    config.train_total_steps = 50e4
-    config.difficulty_level = 8
-    train_configs.append(config)
-
     config = TaskConfig()
     config.name = "target"
-    config.txt_file_path = r"./maps/target.txt"
+    config.txt_file_path = r"maps/target.txt"
     config.rand_gen_shape = None
     config.custom_mission = "reach the goal"
-    config.minimum_display_size = 8
+    config.minimum_display_size = 6
     config.display_mode = "middle"
     config.random_rotate = False
     config.random_flip = False
@@ -457,10 +388,10 @@ if __name__ == '__main__':
     ##################################################################
     config = TaskConfig()
     config.name = "target"
-    config.txt_file_path = r"./maps/target.txt"
+    config.txt_file_path = r"maps/target.txt"
     config.rand_gen_shape = None
     config.custom_mission = "reach the goal"
-    config.minimum_display_size = 8
+    config.minimum_display_size = 6
     config.display_mode = "middle"
     config.random_rotate = False
     config.random_flip = False
@@ -485,14 +416,14 @@ if __name__ == '__main__':
                     n_heads=8,
                     activation_fn=nn.LeakyReLU  # Activation function
                 ),
-                net_arch=dict(pi=[64, 64,], vf=[64, 64,]),  # Policy and value network architecture
+                net_arch=dict(pi=[64, 128, 128], vf=[64, 128, 128]),  # Policy and value network architecture
                 activation_fn=nn.LeakyReLU,
             )
         )
         runner.train(
             session_dir=f"./experiments/lock_policy/{i}",
-            eval_freq=int(5e4),
-            compute_info_freq=int(5e4),
+            eval_freq=int(2e4),
+            compute_info_freq=int(2e4),
             num_eval_episodes=10,
             eval_deterministic=False,
             start_time_step=0,

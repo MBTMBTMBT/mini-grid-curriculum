@@ -199,6 +199,9 @@ class LockPolicyTrainer:
             # train
             model.learn(total_timesteps=steps, callback=callback_list, progress_bar=True)
 
+            # accumulated timestep
+            start_time_step += info_eval_callback.num_timesteps
+
         # start re-training by freezing the second half of the net and replace the first half.
         for eval_env, eval_env_name, each_task_config in zip(eval_env_list, eval_env_name_list, train_configs):
             _model = PPO(CustomActorCriticPolicy, env=eval_env, policy_kwargs=self.policy_kwargs, verbose=1)
@@ -337,11 +340,11 @@ if __name__ == '__main__':
                 features_extractor_class=TransformerEncoderExtractor,  # Use the custom encoder extractor
                 features_extractor_kwargs=dict(
                     net_arch=[512, 64],  # Custom layer sizes
-                    num_transformer_layers=4,
+                    num_transformer_layers=1,
                     n_heads=4,
                     activation_fn=nn.LeakyReLU  # Activation function
                 ),
-                net_arch=dict(pi=[64, 512, 512], vf=[64, 512, 512]),  # Policy and value network architecture
+                net_arch=dict(pi=[64, 64,], vf=[64, 64,]),  # Policy and value network architecture
                 activation_fn=nn.LeakyReLU,
             )
         )

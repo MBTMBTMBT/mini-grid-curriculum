@@ -186,10 +186,12 @@ class LockPolicyTrainer:
             steps = train_env_step_list[i]
 
             if load_path and os.path.exists(load_path):
+                print(f"Loading the model from {load_path}...")
                 model = PPO.load(load_path, env=env)
             else:
                 model = PPO(CustomActorCriticPolicy, env=env, policy_kwargs=self.policy_kwargs, verbose=1)
                 print("Initialized new model.")
+                load_path = os.path.join(model_save_dir, f"saved_model_latest.zip")
 
             info_eval_callback = InfoEvalSaveCallback(
                 eval_envs=eval_env_list,
@@ -268,7 +270,7 @@ if __name__ == '__main__':
     config.random_rotate = True
     config.random_flip = True
     config.max_steps = 500
-    config.train_total_steps = 5e4
+    config.train_total_steps = 10e4
     config.difficulty_level = 4
     train_configs.append(config)
 
@@ -297,7 +299,7 @@ if __name__ == '__main__':
     config.random_rotate = True
     config.random_flip = True
     config.max_steps = 500
-    config.train_total_steps = 10e4
+    config.train_total_steps = 20e4
     config.difficulty_level = 5
     train_configs.append(config)
 
@@ -336,7 +338,7 @@ if __name__ == '__main__':
     config.random_rotate = True
     config.random_flip = True
     config.max_steps = 500
-    config.train_total_steps = 20e4
+    config.train_total_steps = 40e4
     config.difficulty_level = 6
     train_configs.append(config)
 
@@ -470,7 +472,7 @@ if __name__ == '__main__':
     ##################################################################
 
     # encoder = None  # test non encoding case
-    for i in range(5):
+    for i in range(3):
         runner = LockPolicyTrainer(
             train_configs,
             eval_configs,
@@ -479,8 +481,8 @@ if __name__ == '__main__':
                 features_extractor_class=TransformerEncoderExtractor,  # Use the custom encoder extractor
                 features_extractor_kwargs=dict(
                     net_arch=[1024, 64],  # Custom layer sizes
-                    num_transformer_layers=2,
-                    n_heads=4,
+                    num_transformer_layers=4,
+                    n_heads=8,
                     activation_fn=nn.LeakyReLU  # Activation function
                 ),
                 net_arch=dict(pi=[64, 64,], vf=[64, 64,]),  # Policy and value network architecture
@@ -489,8 +491,8 @@ if __name__ == '__main__':
         )
         runner.train(
             session_dir=f"./experiments/lock_policy/{i}",
-            eval_freq=int(10e3),
-            compute_info_freq=int(10e3),
+            eval_freq=int(5e4),
+            compute_info_freq=int(5e4),
             num_eval_episodes=10,
             eval_deterministic=False,
             start_time_step=0,

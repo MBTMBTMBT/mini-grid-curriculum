@@ -478,8 +478,8 @@ if __name__ == '__main__':
             policy_kwargs=dict(
                 features_extractor_class=TransformerEncoderExtractor,  # Use the custom encoder extractor
                 features_extractor_kwargs=dict(
-                    net_arch=[512, 64],  # Custom layer sizes
-                    num_transformer_layers=1,
+                    net_arch=[1024, 64],  # Custom layer sizes
+                    num_transformer_layers=2,
                     n_heads=4,
                     activation_fn=nn.LeakyReLU  # Activation function
                 ),

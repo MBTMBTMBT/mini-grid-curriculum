@@ -383,7 +383,7 @@ if __name__ == '__main__':
     config.random_flip = True
     config.max_steps = 500
     config.train_total_steps = 20e4
-    config.difficulty_level = 6
+    config.difficulty_level = 6 + 1
     train_configs.append(config)
 
     config = TaskConfig()

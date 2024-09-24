@@ -411,7 +411,7 @@ if __name__ == '__main__':
     config.random_rotate = True
     config.random_flip = True
     config.max_steps = 500
-    config.train_total_steps = 20e4
+    config.train_total_steps = 50e4
     config.difficulty_level = 0
     train_configs.append(config)
 
@@ -425,7 +425,7 @@ if __name__ == '__main__':
     config.random_rotate = False
     config.random_flip = False
     config.max_steps = 50
-    config.start_pos = (1, 1)
+    config.start_pos = (4, 4)
     config.start_dir = 1
     eval_configs.append(config)
 
@@ -440,7 +440,7 @@ if __name__ == '__main__':
     config.random_rotate = True
     config.random_flip = True
     config.max_steps = 500
-    config.train_total_steps = 20e4
+    config.train_total_steps = 50e4
     config.difficulty_level = 1
     train_configs.append(config)
 
@@ -454,7 +454,7 @@ if __name__ == '__main__':
     config.random_rotate = False
     config.random_flip = False
     config.max_steps = 50
-    config.start_pos = (1, 1)
+    config.start_pos = (4, 4)
     config.start_dir = 1
     eval_configs.append(config)
 
@@ -469,7 +469,7 @@ if __name__ == '__main__':
     config.random_rotate = True
     config.random_flip = True
     config.max_steps = 500
-    config.train_total_steps = 20e4
+    config.train_total_steps = 50e4
     config.difficulty_level = 2
     train_configs.append(config)
 
@@ -483,7 +483,7 @@ if __name__ == '__main__':
     config.random_rotate = False
     config.random_flip = False
     config.max_steps = 50
-    config.start_pos = (1, 1)
+    config.start_pos = (4, 4)
     config.start_dir = 1
     eval_configs.append(config)
 
@@ -498,7 +498,7 @@ if __name__ == '__main__':
     config.random_rotate = True
     config.random_flip = True
     config.max_steps = 500
-    config.train_total_steps = 20e4
+    config.train_total_steps = 50e4
     config.difficulty_level = 3
     train_configs.append(config)
 
@@ -512,7 +512,7 @@ if __name__ == '__main__':
     config.random_rotate = False
     config.random_flip = False
     config.max_steps = 50
-    config.start_pos = (1, 1)
+    config.start_pos = (4, 4)
     config.start_dir = 1
     eval_configs.append(config)
 
@@ -530,12 +530,12 @@ if __name__ == '__main__':
             policy_kwargs=dict(
                 features_extractor_class=TransformerEncoderExtractor,  # Use the custom encoder extractor
                 features_extractor_kwargs=dict(
-                    net_arch=[1024, 64],  # Custom layer sizes
-                    num_transformer_layers=2,
+                    net_arch=[64],  # Custom layer sizes
+                    num_transformer_layers=1,
                     n_heads=4,
                     activation_fn=nn.LeakyReLU  # Activation function
                 ),
-                net_arch=dict(pi=[64, 128], vf=[64, 128]),  # Policy and value network architecture
+                net_arch=dict(pi=[64, 64], vf=[64, 64]),  # Policy and value network architecture
                 activation_fn=nn.LeakyReLU,
             )
         )

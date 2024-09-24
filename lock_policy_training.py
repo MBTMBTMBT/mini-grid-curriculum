@@ -259,93 +259,166 @@ if __name__ == '__main__':
     train_configs = []
     eval_configs = []
 
+    # ##################################################################
+    # config = TaskConfig()
+    # config.name = "4"
+    # config.txt_file_path = None
+    # config.rand_gen_shape = (4, 4)
+    # config.custom_mission = "reach the goal"
+    # config.minimum_display_size = 4
+    # config.display_mode = "random"
+    # config.random_rotate = True
+    # config.random_flip = True
+    # config.max_steps = 500
+    # config.train_total_steps = 50e4
+    # config.difficulty_level = 4
+    # train_configs.append(config)
+    #
+    # config = TaskConfig()
+    # config.name = "4"
+    # config.rand_gen_shape = None
+    # config.txt_file_path = r"./maps/4.txt"
+    # config.custom_mission = "reach the goal"
+    # config.minimum_display_size = 4
+    # config.display_mode = "middle"
+    # config.random_rotate = False
+    # config.random_flip = False
+    # config.max_steps = 50
+    # config.start_pos = (1, 1)
+    # config.start_dir = 1
+    # eval_configs.append(config)
+    #
+    # ##################################################################
+    # config = TaskConfig()
+    # config.name = "5"
+    # config.txt_file_path = None
+    # config.rand_gen_shape = (5, 5)
+    # config.custom_mission = "reach the goal"
+    # config.minimum_display_size = 5
+    # config.display_mode = "random"
+    # config.random_rotate = True
+    # config.random_flip = True
+    # config.max_steps = 500
+    # config.train_total_steps = 100e4
+    # config.difficulty_level = 5
+    # train_configs.append(config)
+    #
+    # config = TaskConfig()
+    # config.name = "5-1"
+    # config.txt_file_path = r"./maps/5-1.txt"
+    # config.rand_gen_shape = None
+    # config.custom_mission = "reach the goal"
+    # config.minimum_display_size = 5
+    # config.display_mode = "middle"
+    # config.random_rotate = False
+    # config.random_flip = False
+    # config.max_steps = 50
+    # config.start_pos = (1, 1)
+    # config.start_dir = 1
+    # eval_configs.append(config)
+    #
+    # config = TaskConfig().clone(config)
+    # config.name = "5-2"
+    # config.txt_file_path = r"./maps/5-2.txt"
+    # eval_configs.append(config)
+    #
+    # config = TaskConfig().clone(config)
+    # config.name = "5-3"
+    # config.txt_file_path = r"./maps/5-3.txt"
+    # eval_configs.append(config)
+    #
+    # ##################################################################
+    # config = TaskConfig()
+    # config.name = "6"
+    # config.txt_file_path = None
+    # config.rand_gen_shape = (6, 6)
+    # config.custom_mission = "reach the goal"
+    # config.minimum_display_size = 6
+    # config.display_mode = "random"
+    # config.random_rotate = True
+    # config.random_flip = True
+    # config.max_steps = 500
+    # config.train_total_steps = 100e4
+    # config.difficulty_level = 6
+    # train_configs.append(config)
+    #
+    # config = TaskConfig()
+    # config.name = "6-1"
+    # config.txt_file_path = r"./maps/6-1.txt"
+    # config.rand_gen_shape = None
+    # config.custom_mission = "reach the goal"
+    # config.minimum_display_size = 6
+    # config.display_mode = "middle"
+    # config.random_rotate = False
+    # config.random_flip = False
+    # config.max_steps = 50
+    # config.start_pos = (1, 1)
+    # config.start_dir = 1
+    # eval_configs.append(config)
+    #
+    # config = TaskConfig().clone(config)
+    # config.name = "6-2"
+    # config.txt_file_path = r"./maps/6-2.txt"
+    # eval_configs.append(config)
+    #
+    # config = TaskConfig().clone(config)
+    # config.name = "6-3"
+    # config.txt_file_path = r"./maps/6-3.txt"
+    # eval_configs.append(config)
+    #
+    # config = TaskConfig().clone(config)
+    # config.name = "6-4"
+    # config.txt_file_path = r"./maps/6-4.txt"
+    # eval_configs.append(config)
+    #
+    # ##################################################################
+    # config = TaskConfig()
+    # config.name = "target"
+    # config.txt_file_path = r"maps/target.txt"
+    # config.rand_gen_shape = None
+    # config.custom_mission = "reach the goal"
+    # config.minimum_display_size = 6
+    # config.display_mode = "random"
+    # config.random_rotate = True
+    # config.random_flip = True
+    # config.max_steps = 500
+    # config.train_total_steps = 20e4
+    # config.difficulty_level = 6 + 1
+    # train_configs.append(config)
+    #
+    # config = TaskConfig()
+    # config.name = "target"
+    # config.txt_file_path = r"maps/target.txt"
+    # config.rand_gen_shape = None
+    # config.custom_mission = "reach the goal"
+    # config.minimum_display_size = 6
+    # config.display_mode = "middle"
+    # config.random_rotate = False
+    # config.random_flip = False
+    # config.max_steps = 50
+    # config.start_pos = (1, 1)
+    # config.start_dir = 1
+    # eval_configs.append(config)
+
     ##################################################################
     config = TaskConfig()
-    config.name = "4"
-    config.txt_file_path = None
-    config.rand_gen_shape = (4, 4)
+    config.name = "0"
+    config.rand_gen_shape = None
+    config.txt_file_path = r"./maps/0.txt"
     config.custom_mission = "reach the goal"
-    config.minimum_display_size = 4
+    config.minimum_display_size = 6
     config.display_mode = "random"
     config.random_rotate = True
     config.random_flip = True
     config.max_steps = 500
     config.train_total_steps = 20e4
-    config.difficulty_level = 4
+    config.difficulty_level = 0
     train_configs.append(config)
 
     config = TaskConfig()
-    config.name = "4"
+    config.name = "0"
     config.rand_gen_shape = None
-    config.txt_file_path = r"./maps/4.txt"
-    config.custom_mission = "reach the goal"
-    config.minimum_display_size = 4
-    config.display_mode = "middle"
-    config.random_rotate = False
-    config.random_flip = False
-    config.max_steps = 50
-    config.start_pos = (1, 1)
-    config.start_dir = 1
-    eval_configs.append(config)
-
-    ##################################################################
-    config = TaskConfig()
-    config.name = "5"
-    config.txt_file_path = None
-    config.rand_gen_shape = (5, 5)
-    config.custom_mission = "reach the goal"
-    config.minimum_display_size = 5
-    config.display_mode = "random"
-    config.random_rotate = True
-    config.random_flip = True
-    config.max_steps = 500
-    config.train_total_steps = 50e4
-    config.difficulty_level = 5
-    train_configs.append(config)
-
-    config = TaskConfig()
-    config.name = "5-1"
-    config.txt_file_path = r"./maps/5-1.txt"
-    config.rand_gen_shape = None
-    config.custom_mission = "reach the goal"
-    config.minimum_display_size = 5
-    config.display_mode = "middle"
-    config.random_rotate = False
-    config.random_flip = False
-    config.max_steps = 50
-    config.start_pos = (1, 1)
-    config.start_dir = 1
-    eval_configs.append(config)
-
-    config = TaskConfig().clone(config)
-    config.name = "5-2"
-    config.txt_file_path = r"./maps/5-2.txt"
-    eval_configs.append(config)
-
-    config = TaskConfig().clone(config)
-    config.name = "5-3"
-    config.txt_file_path = r"./maps/5-3.txt"
-    eval_configs.append(config)
-
-    ##################################################################
-    config = TaskConfig()
-    config.name = "6"
-    config.txt_file_path = None
-    config.rand_gen_shape = (6, 6)
-    config.custom_mission = "reach the goal"
-    config.minimum_display_size = 6
-    config.display_mode = "random"
-    config.random_rotate = True
-    config.random_flip = True
-    config.max_steps = 500
-    config.train_total_steps = 50e4
-    config.difficulty_level = 6
-    train_configs.append(config)
-
-    config = TaskConfig()
-    config.name = "6-1"
-    config.txt_file_path = r"./maps/6-1.txt"
-    config.rand_gen_shape = None
+    config.txt_file_path = r"./maps/0.txt"
     config.custom_mission = "reach the goal"
     config.minimum_display_size = 6
     config.display_mode = "middle"
@@ -356,26 +429,11 @@ if __name__ == '__main__':
     config.start_dir = 1
     eval_configs.append(config)
 
-    config = TaskConfig().clone(config)
-    config.name = "6-2"
-    config.txt_file_path = r"./maps/6-2.txt"
-    eval_configs.append(config)
-
-    config = TaskConfig().clone(config)
-    config.name = "6-3"
-    config.txt_file_path = r"./maps/6-3.txt"
-    eval_configs.append(config)
-
-    config = TaskConfig().clone(config)
-    config.name = "6-4"
-    config.txt_file_path = r"./maps/6-4.txt"
-    eval_configs.append(config)
-
     ##################################################################
     config = TaskConfig()
-    config.name = "target"
-    config.txt_file_path = r"maps/target.txt"
+    config.name = "1"
     config.rand_gen_shape = None
+    config.txt_file_path = r"./maps/1.txt"
     config.custom_mission = "reach the goal"
     config.minimum_display_size = 6
     config.display_mode = "random"
@@ -383,13 +441,71 @@ if __name__ == '__main__':
     config.random_flip = True
     config.max_steps = 500
     config.train_total_steps = 20e4
-    config.difficulty_level = 6 + 1
+    config.difficulty_level = 1
     train_configs.append(config)
 
     config = TaskConfig()
-    config.name = "target"
-    config.txt_file_path = r"maps/target.txt"
+    config.name = "1"
     config.rand_gen_shape = None
+    config.txt_file_path = r"./maps/1.txt"
+    config.custom_mission = "reach the goal"
+    config.minimum_display_size = 6
+    config.display_mode = "middle"
+    config.random_rotate = False
+    config.random_flip = False
+    config.max_steps = 50
+    config.start_pos = (1, 1)
+    config.start_dir = 1
+    eval_configs.append(config)
+
+    ##################################################################
+    config = TaskConfig()
+    config.name = "2"
+    config.rand_gen_shape = None
+    config.txt_file_path = r"./maps/2.txt"
+    config.custom_mission = "reach the goal"
+    config.minimum_display_size = 6
+    config.display_mode = "random"
+    config.random_rotate = True
+    config.random_flip = True
+    config.max_steps = 500
+    config.train_total_steps = 20e4
+    config.difficulty_level = 2
+    train_configs.append(config)
+
+    config = TaskConfig()
+    config.name = "2"
+    config.rand_gen_shape = None
+    config.txt_file_path = r"./maps/2.txt"
+    config.custom_mission = "reach the goal"
+    config.minimum_display_size = 6
+    config.display_mode = "middle"
+    config.random_rotate = False
+    config.random_flip = False
+    config.max_steps = 50
+    config.start_pos = (1, 1)
+    config.start_dir = 1
+    eval_configs.append(config)
+
+    ##################################################################
+    config = TaskConfig()
+    config.name = "3"
+    config.rand_gen_shape = None
+    config.txt_file_path = r"./maps/3.txt"
+    config.custom_mission = "reach the goal"
+    config.minimum_display_size = 6
+    config.display_mode = "random"
+    config.random_rotate = True
+    config.random_flip = True
+    config.max_steps = 500
+    config.train_total_steps = 20e4
+    config.difficulty_level = 3
+    train_configs.append(config)
+
+    config = TaskConfig()
+    config.name = "3"
+    config.rand_gen_shape = None
+    config.txt_file_path = r"./maps/3.txt"
     config.custom_mission = "reach the goal"
     config.minimum_display_size = 6
     config.display_mode = "middle"
@@ -415,16 +531,16 @@ if __name__ == '__main__':
                 features_extractor_class=TransformerEncoderExtractor,  # Use the custom encoder extractor
                 features_extractor_kwargs=dict(
                     net_arch=[1024, 64],  # Custom layer sizes
-                    num_transformer_layers=4,
-                    n_heads=8,
+                    num_transformer_layers=2,
+                    n_heads=4,
                     activation_fn=nn.LeakyReLU  # Activation function
                 ),
-                net_arch=dict(pi=[64, 128, 128], vf=[64, 128, 128]),  # Policy and value network architecture
+                net_arch=dict(pi=[64, 128], vf=[64, 128]),  # Policy and value network architecture
                 activation_fn=nn.LeakyReLU,
             )
         )
         runner.train(
-            session_dir=f"./experiments/lock_policy/{i}",
+            session_dir=f"./experiments/mazes/run{i}",
             eval_freq=int(2e4),
             compute_info_freq=int(2e4),
             num_eval_episodes=10,

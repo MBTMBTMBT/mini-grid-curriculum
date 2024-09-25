@@ -46,12 +46,20 @@ class MLPEncoderExtractor(BaseFeaturesExtractor):
         # Initially, the network is not frozen
         self.frozen = False
 
-    def forward(self, observations: th.Tensor) -> th.Tensor:
+    def forward(self, observations: th.Tensor, binary_output=True) -> th.Tensor:
         # First flatten the input (same as FlattenExtractor)
         observations = observations.view(observations.size(0), -1)
         # Then pass through the encoder network
         encoded = self.encoder(observations)
-        return encoded
+
+        # Conditional output formatting based on binary_output flag
+        if binary_output:
+            # Output binary version using STE-like method for backprop compatibility
+            encoded_binary = (encoded > 0.5).float().detach() + encoded - encoded.detach()
+            return encoded_binary
+        else:
+            # Output continuous values
+            return encoded
 
     def freeze(self):
         """
@@ -128,7 +136,7 @@ class TransformerEncoderExtractor(BaseFeaturesExtractor):
         # Initially, the network is not frozen
         self.frozen = False
 
-    def forward(self, observations: th.Tensor) -> th.Tensor:
+    def forward(self, observations: th.Tensor, binary_output=True) -> th.Tensor:
         # Flatten the input observations
         observations = observations.view(observations.size(0), -1)
 
@@ -148,9 +156,16 @@ class TransformerEncoderExtractor(BaseFeaturesExtractor):
         encoded = embedded.squeeze(1)  # Remove the extra sequence dimension
 
         # Pass through the MLP network
-        output = self.mlp(encoded)
+        encoded = self.mlp(encoded)
 
-        return output
+        # Conditional output formatting based on binary_output flag
+        if binary_output:
+            # Output binary version using STE-like method for backprop compatibility
+            encoded_binary = (encoded > 0.5).float().detach() + encoded - encoded.detach()
+            return encoded_binary
+        else:
+            # Output continuous values
+            return encoded
 
     def freeze(self):
         """

@@ -1,6 +1,7 @@
 from typing import Callable, Optional, List, Dict, Union, Type
 
 import numpy as np
+import torch
 import torch as th
 import torch.nn as nn
 import gymnasium as gym
@@ -32,10 +33,13 @@ class MLPEncoderExtractor(BaseFeaturesExtractor):
             net_arch = [64, 64]
         input_dim = self.features_dim  # Flattened observation dimension
         layers = []
-        for layer_size in net_arch:
-            layers.append(nn.Linear(input_dim, layer_size))  # Fully connected layer
-            layers.append(activation_fn())  # Activation function
+        for layer_size in net_arch[:-1]:
+            layers.append(nn.Linear(input_dim, layer_size))
+            layers.append(activation_fn())
             input_dim = layer_size
+
+        # add last layer without activation
+        layers.append(nn.Linear(input_dim, net_arch[-1]))
 
         # Create the sequential model
         self.encoder = nn.Sequential(*layers)
@@ -46,11 +50,17 @@ class MLPEncoderExtractor(BaseFeaturesExtractor):
         # Initially, the network is not frozen
         self.frozen = False
 
+        # slop of last activation layer
+        self.slope = 1.0
+
     def forward(self, observations: th.Tensor, binary_output=True) -> th.Tensor:
         # First flatten the input (same as FlattenExtractor)
         observations = observations.view(observations.size(0), -1)
         # Then pass through the encoder network
         encoded = self.encoder(observations)
+
+        # sigmoid activation
+        encoded = torch.sigmoid(self.slope * encoded)
 
         # Conditional output formatting based on binary_output flag
         if binary_output:
@@ -122,10 +132,13 @@ class TransformerEncoderExtractor(BaseFeaturesExtractor):
         # Define the MLP layers according to net_arch
         mlp_layers = []
         input_dim = d_model  # Start with the output dimension of the Transformer layers
-        for layer_size in net_arch:
+        for layer_size in net_arch[:-1]:
             mlp_layers.append(nn.Linear(input_dim, layer_size))
             mlp_layers.append(activation_fn())
             input_dim = layer_size
+
+        # add last layer without activation
+        mlp_layers.append(nn.Linear(input_dim, net_arch[-1]))
 
         # Create the MLP network as a sequential model
         self.mlp = nn.Sequential(*mlp_layers)
@@ -135,6 +148,9 @@ class TransformerEncoderExtractor(BaseFeaturesExtractor):
 
         # Initially, the network is not frozen
         self.frozen = False
+
+        # slop of last activation layer
+        self.slope = 1.0
 
     def forward(self, observations: th.Tensor, binary_output=True) -> th.Tensor:
         # Flatten the input observations
@@ -154,6 +170,9 @@ class TransformerEncoderExtractor(BaseFeaturesExtractor):
 
         # Flatten the output from the Transformer
         encoded = embedded.squeeze(1)  # Remove the extra sequence dimension
+
+        # sigmoid activation
+        encoded = torch.sigmoid(self.slope * encoded)
 
         # Pass through the MLP network
         encoded = self.mlp(encoded)

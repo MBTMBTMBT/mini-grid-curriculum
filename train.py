@@ -55,22 +55,20 @@ class TaskConfig:
         return new
 
 
-class LockPolicyTrainer:
+class Trainer:
     def __init__(
             self,
             train_configs: List[TaskConfig],
             eval_configs: List[TaskConfig],
-            target_configs: List[TaskConfig],
             policy_kwargs=None,
     ):
         self.train_configs = train_configs
         self.eval_configs = eval_configs
-        self.target_configs = target_configs
         self.max_minimum_display_size: int = 0
         self.train_task_dict: Dict[int, List[TaskConfig]] = dict()
 
         # add tasks, find the minimum display size for all
-        for each_task_config in train_configs + eval_configs + target_configs:
+        for each_task_config in train_configs + eval_configs:
             if each_task_config.minimum_display_size > self.max_minimum_display_size:
                 self.max_minimum_display_size = each_task_config.minimum_display_size
             if each_task_config in train_configs:
@@ -129,7 +127,6 @@ class LockPolicyTrainer:
         train_env_step_list = []
         eval_env_list = []
         eval_env_name_list = []
-        target_env_name_list = []
         train_env_steps = []
         train_env_names = []
 
@@ -137,16 +134,6 @@ class LockPolicyTrainer:
             # Store evaluation environments and names
             eval_env_list.append(VecMonitor(DummyVecEnv([lambda: make_env(each_task_config)])))
             eval_env_name_list.append(each_task_config.name)
-
-
-        # Iterate through target configs to create target environments
-        for each_target_config in self.target_configs:
-            # target_env_list.append(VecMonitor(DummyVecEnv([lambda: make_env(each_target_config, env_type="target")])))
-            target_env_name_list.append(each_target_config.name)
-
-        vec_target_env = VecMonitor(
-            DummyVecEnv(
-                [lambda: make_env(each_task_config) for each_task_config in self.target_configs]))
 
         for difficulty_level in sorted(self.train_task_dict.keys()):
             train_tasks = self.train_task_dict[difficulty_level]
@@ -228,38 +215,6 @@ class LockPolicyTrainer:
             # accumulated timestep
             start_time_step += info_eval_callback.num_timesteps
 
-        # start re-training by freezing the second half of the net and replace the first half.
-        for eval_env, eval_env_name, each_task_config in zip(eval_env_list, eval_env_name_list, train_configs):
-            _model = PPO(CustomActorCriticPolicy, env=eval_env, policy_kwargs=self.policy_kwargs, verbose=1)
-            _model.policy.mlp_extractor.load_state_dict(model.policy.mlp_extractor.state_dict())
-            _model.policy.freeze_mlp_extractor()
-            _info_eval_callback = InfoEvalSaveCallback(
-                eval_envs=[vec_target_env],
-                eval_env_names=[eval_env_name + "_policy_frozen"],
-                model=model,
-                model_save_dir=model_save_dir,
-                model_save_name=eval_env_name + "_policy_frozen",
-                log_writer=log_writer,
-                eval_freq=eval_freq,
-                compute_info_freq=compute_info_freq,
-                n_eval_episodes=num_eval_episodes,
-                deterministic=eval_deterministic,
-                verbose=1,
-                start_timestep=start_time_step,
-                iter_gamma=iter_gamma,
-                iter_threshold=iter_threshold,
-                max_iter=max_iter,
-            )
-            _sigmoid_slope_manager_callback = SigmoidSlopeManagerCallback(
-                model=model.policy.features_extractor,
-                total_train_steps=each_task_config.train_total_steps,
-            )
-
-            _callback_list = CallbackList(callbacks=[_info_eval_callback, _sigmoid_slope_manager_callback])
-
-            # train
-            _model.learn(total_timesteps=each_task_config.train_total_steps, callback=_callback_list, progress_bar=True)
-
         # close the writer
         log_writer.close()
 
@@ -268,159 +223,18 @@ if __name__ == '__main__':
     train_configs = []
     eval_configs = []
 
-    # ##################################################################
-    # config = TaskConfig()
-    # config.name = "4"
-    # config.txt_file_path = None
-    # config.rand_gen_shape = (4, 4)
-    # config.custom_mission = "reach the goal"
-    # config.minimum_display_size = 4
-    # config.display_mode = "random"
-    # config.random_rotate = True
-    # config.random_flip = True
-    # config.max_steps = 500
-    # config.train_total_steps = 50e4
-    # config.difficulty_level = 4
-    # train_configs.append(config)
-    #
-    # config = TaskConfig()
-    # config.name = "4"
-    # config.rand_gen_shape = None
-    # config.txt_file_path = r"./maps/4.txt"
-    # config.custom_mission = "reach the goal"
-    # config.minimum_display_size = 4
-    # config.display_mode = "middle"
-    # config.random_rotate = False
-    # config.random_flip = False
-    # config.max_steps = 50
-    # config.start_pos = (1, 1)
-    # config.start_dir = 1
-    # eval_configs.append(config)
-    #
-    # ##################################################################
-    # config = TaskConfig()
-    # config.name = "5"
-    # config.txt_file_path = None
-    # config.rand_gen_shape = (5, 5)
-    # config.custom_mission = "reach the goal"
-    # config.minimum_display_size = 5
-    # config.display_mode = "random"
-    # config.random_rotate = True
-    # config.random_flip = True
-    # config.max_steps = 500
-    # config.train_total_steps = 100e4
-    # config.difficulty_level = 5
-    # train_configs.append(config)
-    #
-    # config = TaskConfig()
-    # config.name = "5-1"
-    # config.txt_file_path = r"./maps/5-1.txt"
-    # config.rand_gen_shape = None
-    # config.custom_mission = "reach the goal"
-    # config.minimum_display_size = 5
-    # config.display_mode = "middle"
-    # config.random_rotate = False
-    # config.random_flip = False
-    # config.max_steps = 50
-    # config.start_pos = (1, 1)
-    # config.start_dir = 1
-    # eval_configs.append(config)
-    #
-    # config = TaskConfig().clone(config)
-    # config.name = "5-2"
-    # config.txt_file_path = r"./maps/5-2.txt"
-    # eval_configs.append(config)
-    #
-    # config = TaskConfig().clone(config)
-    # config.name = "5-3"
-    # config.txt_file_path = r"./maps/5-3.txt"
-    # eval_configs.append(config)
-    #
-    # ##################################################################
-    # config = TaskConfig()
-    # config.name = "6"
-    # config.txt_file_path = None
-    # config.rand_gen_shape = (6, 6)
-    # config.custom_mission = "reach the goal"
-    # config.minimum_display_size = 6
-    # config.display_mode = "random"
-    # config.random_rotate = True
-    # config.random_flip = True
-    # config.max_steps = 500
-    # config.train_total_steps = 100e4
-    # config.difficulty_level = 6
-    # train_configs.append(config)
-    #
-    # config = TaskConfig()
-    # config.name = "6-1"
-    # config.txt_file_path = r"./maps/6-1.txt"
-    # config.rand_gen_shape = None
-    # config.custom_mission = "reach the goal"
-    # config.minimum_display_size = 6
-    # config.display_mode = "middle"
-    # config.random_rotate = False
-    # config.random_flip = False
-    # config.max_steps = 50
-    # config.start_pos = (1, 1)
-    # config.start_dir = 1
-    # eval_configs.append(config)
-    #
-    # config = TaskConfig().clone(config)
-    # config.name = "6-2"
-    # config.txt_file_path = r"./maps/6-2.txt"
-    # eval_configs.append(config)
-    #
-    # config = TaskConfig().clone(config)
-    # config.name = "6-3"
-    # config.txt_file_path = r"./maps/6-3.txt"
-    # eval_configs.append(config)
-    #
-    # config = TaskConfig().clone(config)
-    # config.name = "6-4"
-    # config.txt_file_path = r"./maps/6-4.txt"
-    # eval_configs.append(config)
-    #
-    # ##################################################################
-    # config = TaskConfig()
-    # config.name = "target"
-    # config.txt_file_path = r"maps/target.txt"
-    # config.rand_gen_shape = None
-    # config.custom_mission = "reach the goal"
-    # config.minimum_display_size = 6
-    # config.display_mode = "random"
-    # config.random_rotate = True
-    # config.random_flip = True
-    # config.max_steps = 500
-    # config.train_total_steps = 20e4
-    # config.difficulty_level = 6 + 1
-    # train_configs.append(config)
-    #
-    # config = TaskConfig()
-    # config.name = "target"
-    # config.txt_file_path = r"maps/target.txt"
-    # config.rand_gen_shape = None
-    # config.custom_mission = "reach the goal"
-    # config.minimum_display_size = 6
-    # config.display_mode = "middle"
-    # config.random_rotate = False
-    # config.random_flip = False
-    # config.max_steps = 50
-    # config.start_pos = (1, 1)
-    # config.start_dir = 1
-    # eval_configs.append(config)
-
     ##################################################################
     config = TaskConfig()
-    config.name = "0"
-    config.rand_gen_shape = None
-    config.txt_file_path = r"./maps/0.txt"
+    config.name = "rand"
+    config.rand_gen_shape = (6, 6)
+    config.txt_file_path = None
     config.custom_mission = "reach the goal"
     config.minimum_display_size = 6
     config.display_mode = "random"
     config.random_rotate = True
     config.random_flip = True
     config.max_steps = 500
-    config.train_total_steps = 100e4
+    config.train_total_steps = 1e7
     config.difficulty_level = 0
     train_configs.append(config)
 
@@ -438,21 +252,6 @@ if __name__ == '__main__':
     config.start_dir = 1
     eval_configs.append(config)
 
-    ##################################################################
-    config = TaskConfig()
-    config.name = "1"
-    config.rand_gen_shape = None
-    config.txt_file_path = r"./maps/1.txt"
-    config.custom_mission = "reach the goal"
-    config.minimum_display_size = 6
-    config.display_mode = "random"
-    config.random_rotate = True
-    config.random_flip = True
-    config.max_steps = 500
-    config.train_total_steps = 100e4
-    config.difficulty_level = 1
-    train_configs.append(config)
-
     config = TaskConfig()
     config.name = "1"
     config.rand_gen_shape = None
@@ -466,21 +265,6 @@ if __name__ == '__main__':
     config.start_pos = (4, 4)
     config.start_dir = 1
     eval_configs.append(config)
-
-    ##################################################################
-    config = TaskConfig()
-    config.name = "2"
-    config.rand_gen_shape = None
-    config.txt_file_path = r"./maps/2.txt"
-    config.custom_mission = "reach the goal"
-    config.minimum_display_size = 6
-    config.display_mode = "random"
-    config.random_rotate = True
-    config.random_flip = True
-    config.max_steps = 500
-    config.train_total_steps = 100e4
-    config.difficulty_level = 2
-    train_configs.append(config)
 
     config = TaskConfig()
     config.name = "2"
@@ -496,21 +280,6 @@ if __name__ == '__main__':
     config.start_dir = 1
     eval_configs.append(config)
 
-    ##################################################################
-    config = TaskConfig()
-    config.name = "3"
-    config.rand_gen_shape = None
-    config.txt_file_path = r"./maps/3.txt"
-    config.custom_mission = "reach the goal"
-    config.minimum_display_size = 6
-    config.display_mode = "random"
-    config.random_rotate = True
-    config.random_flip = True
-    config.max_steps = 500
-    config.train_total_steps = 100e4
-    config.difficulty_level = 3
-    train_configs.append(config)
-
     config = TaskConfig()
     config.name = "3"
     config.rand_gen_shape = None
@@ -524,18 +293,14 @@ if __name__ == '__main__':
     config.start_pos = (4, 4)
     config.start_dir = 1
     eval_configs.append(config)
-
-    ##################################################################
-    target_configs = [config]
 
     ##################################################################
 
     # encoder = None  # test non encoding case
     for i in range(3):
-        runner = LockPolicyTrainer(
+        runner = Trainer(
             train_configs,
             eval_configs,
-            target_configs,
             policy_kwargs=dict(
                 features_extractor_class=TransformerEncoderExtractor,  # Use the custom encoder extractor
                 features_extractor_kwargs=dict(

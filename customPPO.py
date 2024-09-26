@@ -126,7 +126,10 @@ class CustomPPO(PPO):
             buffer_size=self.n_steps,
             observation_space=self.observation_space,
             action_space=self.action_space,
-            device=self.device
+            device=self.device,
+            gamma=self.gamma,
+            gae_lambda=self.gae_lambda,
+            n_envs=self.n_envs,
         )
 
     def collect_rollouts(

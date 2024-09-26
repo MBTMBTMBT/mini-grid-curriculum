@@ -1,8 +1,7 @@
-from typing import Callable, Optional, List, Dict, Union, Type, Generator
+from typing import Callable, Optional, List, Dict, Union, Type, Generator, Tuple, Any
 
 import numpy as np
 import torch
-import torch as th
 import torch.nn as nn
 import gymnasium as gym
 from gymnasium.vector.utils import spaces
@@ -12,32 +11,38 @@ from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.evaluation import evaluate_policy
 from stable_baselines3.common.policies import ActorCriticPolicy
 from stable_baselines3.common.env_util import make_vec_env
-from stable_baselines3.common.type_aliases import RolloutBufferSamples
+from stable_baselines3.common.type_aliases import RolloutBufferSamples, PyTorchObs
 from stable_baselines3.common.utils import obs_as_tensor, explained_variance
 from stable_baselines3.common.vec_env import VecNormalize, VecEnv
+from torch import Tensor
 from torch.distributions import Categorical, Normal
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 from stable_baselines3.common.buffers import RolloutBuffer
+
+from binary_state_representation.binary2binaryautoencoder import InvNet, ContrastiveNet, Binary2BinaryDecoder, \
+    RewardPredictor, TerminationPredictor
 
 from torch.nn import functional as F
 
 
 class CustomRolloutBufferSamples(RolloutBufferSamples):
-    next_observations: th.Tensor
+    next_observations: torch.Tensor
+    rewards: torch.Tensor
+    dones: torch.Tensor
 
 
 class CustomRolloutBuffer(RolloutBuffer):
-    def __init__(self, buffer_size, observation_space, action_space, device='cpu', gamma=0.99, gae_lambda=0.95,
-                 n_envs=1):
-        super().__init__(buffer_size, observation_space, action_space, device, gamma=gamma, gae_lambda=gae_lambda,
-                         n_envs=n_envs)
+    def __init__(self, buffer_size, observation_space, action_space, device='cpu', gamma=0.99, gae_lambda=0.95, n_envs=1):
+        super().__init__(buffer_size, observation_space, action_space, device, gamma=gamma, gae_lambda=gae_lambda, n_envs=n_envs)
 
-        # Initialize buffer for next observations
+        # Initialize buffer for next observations and dones
         self.next_observations = np.zeros((self.buffer_size, self.n_envs, *self.obs_shape), dtype=np.float32)
+        self.dones = np.zeros((self.buffer_size, self.n_envs), dtype=bool)  # Initialize buffer for dones
 
     def reset(self) -> None:
         super().reset()
         self.next_observations = np.zeros((self.buffer_size, self.n_envs, *self.obs_shape), dtype=np.float32)
+        self.dones = np.zeros((self.buffer_size, self.n_envs), dtype=bool)  # Reset the dones buffer
 
     def add(self, *args, next_obs=None, **kwargs):
         """
@@ -49,7 +54,10 @@ class CustomRolloutBuffer(RolloutBuffer):
 
         # Store the next observation if provided
         if next_obs is not None:
-            self.next_observations[self.pos - 1] = th.tensor(next_obs, device=self.device)
+            self.next_observations[self.pos - 1] = torch.tensor(next_obs, device=self.device)
+
+        # Store the done signal
+        self.dones[self.pos - 1] = self.episode_starts
 
     def get(self, batch_size: Optional[int] = None) -> Generator[CustomRolloutBufferSamples, None, None]:
         assert self.full, "Buffer is not full"
@@ -64,6 +72,8 @@ class CustomRolloutBuffer(RolloutBuffer):
                 "log_probs",
                 "advantages",
                 "returns",
+                "rewards",  # Include rewards in the tensor names
+                "dones",  # Include dones in the tensor names
             ]
 
             for tensor in _tensor_names:
@@ -82,7 +92,7 @@ class CustomRolloutBuffer(RolloutBuffer):
             self,
             batch_inds: np.ndarray,
             env: Optional[VecNormalize] = None,
-    ) -> RolloutBufferSamples:
+    ) -> CustomRolloutBufferSamples:
         data = (
             self.observations[batch_inds],
             self.next_observations[batch_inds],  # Add next_observations to data
@@ -91,8 +101,10 @@ class CustomRolloutBuffer(RolloutBuffer):
             self.log_probs[batch_inds].flatten(),
             self.advantages[batch_inds].flatten(),
             self.returns[batch_inds].flatten(),
+            self.rewards[batch_inds].flatten(),  # Retrieve rewards from the parent buffer
+            self.dones[batch_inds].flatten(),    # Include dones in the output
         )
-        return RolloutBufferSamples(*tuple(map(self.to_torch, data)))
+        return CustomRolloutBufferSamples(*tuple(map(self.to_torch, data)))
 
 
 class CustomPPO(PPO):
@@ -133,7 +145,7 @@ class CustomPPO(PPO):
                 # Sample a new noise matrix
                 self.policy.reset_noise(env.num_envs)
 
-            with th.no_grad():
+            with torch.no_grad():
                 # Convert to pytorch tensor
                 obs_tensor = obs_as_tensor(self._last_obs, self.device)
                 actions, values, log_probs = self.policy(obs_tensor)
@@ -172,11 +184,11 @@ class CustomPPO(PPO):
                         and infos[idx].get("TimeLimit.truncated", False)
                 ):
                     terminal_obs = self.policy.obs_to_tensor(infos[idx]["terminal_observation"])[0]
-                    with th.no_grad():
+                    with torch.no_grad():
                         terminal_value = self.policy.predict_values(terminal_obs)[0]
                     rewards[idx] += self.gamma * terminal_value
 
-            # Add data to the CustomRolloutBuffer, including next_obs
+            # Add data to the CustomRolloutBuffer, including next_obs and dones
             rollout_buffer.add(
                 self._last_obs,  # actual current observation
                 actions,
@@ -184,12 +196,13 @@ class CustomPPO(PPO):
                 self._last_episode_starts,
                 values,
                 log_probs,
-                next_obs=new_obs  # new_obs as next_obs given to buffer
+                next_obs=new_obs,  # new_obs as next_obs given to buffer
+                dones=dones  # Add dones information
             )
             self._last_obs = new_obs
             self._last_episode_starts = dones
 
-        with th.no_grad():
+        with torch.no_grad():
             # Compute value for the last timestep
             values = self.policy.predict_values(obs_as_tensor(new_obs, self.device))
 
@@ -201,6 +214,7 @@ class CustomPPO(PPO):
         callback.on_rollout_end()
 
         return True
+
 
     def train(self) -> None:
         """
@@ -231,14 +245,12 @@ class CustomPPO(PPO):
                     # Convert discrete action from float to long
                     actions = rollout_data.actions.long().flatten()
 
-                # Extract next observations from rollout data
-                next_obs = rollout_data.next_observations  # Extract next_obs for future use
-
                 # Re-sample the noise matrix because the log_std has changed
                 if self.use_sde:
                     self.policy.reset_noise(self.batch_size)
 
-                values, log_prob, entropy = self.policy.evaluate_actions(rollout_data.observations, actions)
+                values, log_prob, entropy, features \
+                    = self.policy.evaluate_actions(rollout_data.observations, actions, return_features=True)
                 values = values.flatten()
                 # Normalize advantage
                 advantages = rollout_data.advantages
@@ -247,16 +259,16 @@ class CustomPPO(PPO):
                     advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
 
                 # Ratio between old and new policy, should be one at the first iteration
-                ratio = th.exp(log_prob - rollout_data.old_log_prob)
+                ratio = torch.exp(log_prob - rollout_data.old_log_prob)
 
                 # Clipped surrogate loss
                 policy_loss_1 = advantages * ratio
-                policy_loss_2 = advantages * th.clamp(ratio, 1 - clip_range, 1 + clip_range)
-                policy_loss = -th.min(policy_loss_1, policy_loss_2).mean()
+                policy_loss_2 = advantages * torch.clamp(ratio, 1 - clip_range, 1 + clip_range)
+                policy_loss = -torch.min(policy_loss_1, policy_loss_2).mean()
 
                 # Logging
                 pg_losses.append(policy_loss.item())
-                clip_fraction = th.mean((th.abs(ratio - 1) > clip_range).float()).item()
+                clip_fraction = torch.mean((torch.abs(ratio - 1) > clip_range).float()).item()
                 clip_fractions.append(clip_fraction)
 
                 if self.clip_range_vf is None:
@@ -265,7 +277,7 @@ class CustomPPO(PPO):
                 else:
                     # Clip the difference between old and new value
                     # NOTE: this depends on the reward scaling
-                    values_pred = rollout_data.old_values + th.clamp(
+                    values_pred = rollout_data.old_values + torch.clamp(
                         values - rollout_data.old_values, -clip_range_vf, clip_range_vf
                     )
                 # Value loss using the TD(gae_lambda) target
@@ -275,31 +287,72 @@ class CustomPPO(PPO):
                 # Entropy loss to favor exploration
                 if entropy is None:
                     # Approximate entropy when no analytical form
-                    entropy_loss = -th.mean(-log_prob)
+                    entropy_loss = -torch.mean(-log_prob)
                 else:
-                    entropy_loss = -th.mean(entropy)
+                    entropy_loss = -torch.mean(entropy)
 
                 entropy_losses.append(entropy_loss.item())
 
                 loss = policy_loss + self.ent_coef * entropy_loss + self.vf_coef * value_loss
 
+                # if do train the encoder with constrains:
+                if not self.policy.features_extractor.encoder_only:
+                    # Extract next observations from rollout data
+                    obs = rollout_data.observations
+                    next_obs = rollout_data.next_observations  # Extract next_obs for future use
+
+                    differences = obs - next_obs
+                    norms = torch.norm(differences, p=2, dim=1)
+                    same_states = norms < 0.5
+
+                    z0 = features
+                    z1 = self.policy.feature_extractor(next_obs)
+
+                    # filter out the cases that the agent did not move
+                    z0_filtered = z0[~same_states]
+                    z1_filtered = z1[~same_states]
+
+                    # get fake z1
+                    idx = torch.randperm(len(obs))
+                    fake_z1 = z1.view(len(z1), -1)[idx].view(z1.size())
+                    fake_z1_filtered = fake_z1[~same_states]
+
+                    actions_filtered = rollout_data.actions[~same_states]
+
+                    _loss = self.policy.feature_extractor.compute_loss(
+                        obs, next_obs, z0, z1, z0_filtered, z1_filtered,
+                        fake_z1_filtered, rollout_data.actions, actions_filtered, rollout_data.rewards,
+                        rollout_data.dones,
+                    )
+
+                    loss += _loss
+                else:
+                    _loss = torch.tensor(0.0).to(loss.device)
+
                 # Calculate approximate form of reverse KL Divergence for early stopping
-                with th.no_grad():
+                with torch.no_grad():
                     log_ratio = log_prob - rollout_data.old_log_prob
-                    approx_kl_div = th.mean((th.exp(log_ratio) - 1) - log_ratio).cpu().numpy()
+                    approx_kl_div = torch.mean((torch.exp(log_ratio) - 1) - log_ratio).cpu().numpy()
                     approx_kl_divs.append(approx_kl_div)
 
                 if self.target_kl is not None and approx_kl_div > 1.5 * self.target_kl:
                     continue_training = False
                     if self.verbose >= 1:
                         print(f"Early stopping at step {epoch} due to reaching max kl: {approx_kl_div:.2f}")
+
+                    # Optimization step
+                    self.policy.optimizer.zero_grad()
+                    _loss.backward()
+                    # Clip grad norm
+                    torch.nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)
+                    self.policy.optimizer.step()
                     break
 
                 # Optimization step
                 self.policy.optimizer.zero_grad()
                 loss.backward()
                 # Clip grad norm
-                th.nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)
+                torch.nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)
                 self.policy.optimizer.step()
 
             self._n_updates += 1
@@ -317,7 +370,7 @@ class CustomPPO(PPO):
         self.logger.record("train/loss", loss.item())
         self.logger.record("train/explained_variance", explained_var)
         if hasattr(self.policy, "log_std"):
-            self.logger.record("train/std", th.exp(self.policy.log_std).mean().item())
+            self.logger.record("train/std", torch.exp(self.policy.log_std).mean().item())
 
         self.logger.record("train/n_updates", self._n_updates, exclude="tensorboard")
         self.logger.record("train/clip_range", clip_range)
@@ -328,12 +381,13 @@ class CustomPPO(PPO):
 class BaseEncoderExtractor(BaseFeaturesExtractor):
     def __init__(self, observation_space: gym.spaces.Box, slope=1.0, binary_output=False, encoder_only=True, weights=None, action_space: gym.spaces.Discrete = None):
         # Initialize the base feature extractor with the flattened observation size
-        super().__init__(observation_space, th.prod(th.tensor(observation_space.shape)).item())
+        super().__init__(observation_space, torch.prod(torch.tensor(observation_space.shape)).item())
 
         # Additional attributes
         self.slope = slope
         self.binary_output = binary_output
         self.frozen = False
+        self.encoder_only = encoder_only
 
         self.inv_model = None
         self.discriminator = None
@@ -341,31 +395,36 @@ class BaseEncoderExtractor(BaseFeaturesExtractor):
         self.reward_predictor = None
         self.termination_predictor = None
 
+        self.weights = weights
+
         if not encoder_only:
             if weights is None:
-                weights = {'inv': 0.2, 'dis': 0.2, 'neighbour': 0.2, 'dec': 0.2, 'rwd': 0.2, 'terminate': 0.2}
+                self.weights = {'inv': 0.2, 'dis': 0.2, 'neighbour': 0.2, 'dec': 0.2, 'rwd': 0.2, 'terminate': 0.2}
+            assert action_space is not None, "Must specify action space."
+            n_actions = action_space.n
+            n_latent_dims = net_arch[-1]
             if weights['inv'] > 0.0:
                 self.inv_model = InvNet(
                     n_actions=n_actions,
                     n_latent_dims=n_latent_dims,
                     n_units_per_layer=1,
                     n_hidden_layers=512,
-                ).to(device)
+                )
 
             if weights['dis'] > 0.0:
                 self.discriminator = ContrastiveNet(
                     n_latent_dims=n_latent_dims,
                     n_hidden_layers=1,
                     n_units_per_layer=512,
-                ).to(device)
+                )
 
             if weights['dec'] > 0.0:
                 self.decoder = Binary2BinaryDecoder(
                     n_latent_dims=n_latent_dims,
-                    output_dim=n_obs_dims,
+                    output_dim=self.features_dim,
                     n_hidden_layers=1,
                     n_units_per_layer=512,
-                ).to(device)
+                )
 
             if weights['rwd'] > 0.0:
                 self.reward_predictor = RewardPredictor(
@@ -373,16 +432,16 @@ class BaseEncoderExtractor(BaseFeaturesExtractor):
                     n_latent_dims=n_latent_dims,
                     n_hidden_layers=1,
                     n_units_per_layer=512,
-                ).to(device)
+                )
 
             if weights['terminate'] > 0.0:
                 self.termination_predictor = TerminationPredictor(
                     n_latent_dims=n_latent_dims,
                     n_hidden_layers=1,
                     n_units_per_layer=512,
-                ).to(device)
+                )
 
-    def forward(self, observations: th.Tensor) -> th.Tensor:
+    def forward(self, observations: torch.Tensor) -> torch.Tensor:
         # First flatten the input (same as FlattenExtractor)
         observations = observations.view(observations.size(0), -1)
         encoded = self.process(observations)
@@ -397,7 +456,84 @@ class BaseEncoderExtractor(BaseFeaturesExtractor):
         else:
             return encoded
 
-    def process(self, observations: th.Tensor) -> th.Tensor:
+    def compute_loss(
+            self,
+            obs: torch.Tensor,
+            next_obs: torch.Tensor,
+            z0: torch.Tensor,
+            z1: torch.Tensor,
+            z0_filtered: torch.Tensor,
+            z1_filtered: torch.Tensor,
+            fake_z1_filtered: torch.Tensor,
+            actions: torch.Tensor,
+            actions_filtered: torch.Tensor,
+            rewards: torch.Tensor,
+            dones: torch.Tensor,
+    ) -> torch.Tensor:
+        device = next(self.parameters()).device
+        if self.encoder_only:
+            return torch.tensor(0.0).to(device)
+
+        rec_loss = torch.tensor(0.0).to(device)
+        if self.decoder:
+            # compute reconstruct loss
+            decoded_z0 = self.decoder(z0)
+            decoded_z1 = self.decoder(z1)
+            rec_loss = self.bce_loss(
+                torch.cat((decoded_z0, decoded_z1), dim=0),
+                torch.cat((obs, next_obs), dim=0),
+            )
+
+        inv_loss = torch.tensor(0.0).to(device)
+        if self.inv_model:
+            if z0_filtered.size(0) > 0:
+                pred_actions = self.inv_model(z0_filtered, z1_filtered)
+                inv_loss = self.cross_entropy(pred_actions, actions_filtered)
+
+        ratio_loss = torch.tensor(0.0).to(device)
+        if self.discriminator:
+            labels = torch.cat((
+                torch.ones(len(z1_filtered), device=z1_filtered.device),
+                torch.zeros(len(fake_z1_filtered), device=fake_z1_filtered.device),
+            ), dim=0)
+            pred_fakes = torch.cat((
+                self.discriminator(z0_filtered, z1_filtered),
+                self.discriminator(z0_filtered, fake_z1_filtered),
+            ), dim=0).squeeze()
+            ratio_loss = self.bce_loss(pred_fakes, labels)
+
+        reward_loss = torch.tensor(0.0).to(device)
+        if self.reward_predictor:
+            # compute reward loss
+            pred_rwds = self.reward_predictor(z0, actions, z1).squeeze()
+            reward_loss = self.mse_loss(pred_rwds, rewards)
+
+        terminate_loss = torch.tensor(0.0).to(device)
+        if self.termination_predictor:
+            # compute terminate loss
+            pred_terminated = self.termination_predictor(z1).squeeze()
+            terminate_loss = self.bce_loss(pred_terminated, dones)
+
+        # compute neighbour loss
+        distances = torch.abs(z0 - z1) * 0.1
+        weights = torch.linspace(1.0, 0.0, steps=z0.size(1)).to(z0.device)
+        weights = weights.unsqueeze(0)
+        weighted_distances = distances * weights
+        weighted_distance = torch.sum(weighted_distances, dim=1)
+        neighbour_loss = torch.mean(torch.pow(weighted_distance, 2))
+
+        # compute total loss
+        loss = torch.tensor(0.0).to(self.device)
+        loss += rec_loss * self.weights['dec']
+        loss += inv_loss * self.weights['inv']
+        loss += ratio_loss * self.weights['dis']
+        loss += reward_loss * self.weights['rwd']
+        loss += terminate_loss * self.weights['terminate']
+        loss += neighbour_loss * self.weights['neighbour']
+
+        return loss
+
+    def process(self, observations: torch.Tensor) -> torch.Tensor:
         # Placeholder method to be implemented by subclasses
         raise NotImplementedError
 
@@ -442,7 +578,7 @@ class MLPEncoderExtractor(BaseEncoderExtractor):
         # Set the features_dim and _features_dim to the last layer size to maintain the binding relationship
         self._features_dim = net_arch[-1]
 
-    def process(self, observations: th.Tensor) -> th.Tensor:
+    def process(self, observations: torch.Tensor) -> torch.Tensor:
         # Use the MLP network from the parent class
         return self.mlp(observations)
 
@@ -488,11 +624,11 @@ class TransformerEncoderExtractor(BaseEncoderExtractor):
         # Set the features_dim and _features_dim to the last layer size to maintain the binding relationship
         self._features_dim = net_arch[-1]
 
-    def process(self, observations: th.Tensor) -> th.Tensor:
+    def process(self, observations: torch.Tensor) -> torch.Tensor:
         # Apply padding if necessary
         if self.pad_size > 0:
-            padding = th.zeros((observations.size(0), self.pad_size), device=observations.device)
-            observations = th.cat((observations, padding), dim=1)
+            padding = torch.zeros((observations.size(0), self.pad_size), device=observations.device)
+            observations = torch.cat((observations, padding), dim=1)
 
         # Reshape to [batch_size, sequence_length, d_model] for Transformer processing
         embedded = observations.unsqueeze(1)  # Change to (batch_size, 1, d_model)
@@ -529,6 +665,35 @@ class CustomActorCriticPolicy(ActorCriticPolicy):
         for param in self.mlp_extractor.parameters():
             param.requires_grad = True
         print("MLP Extractor is now unfrozen.")
+
+    def evaluate_actions(self, obs: PyTorchObs, actions: torch.Tensor, return_features=False) -> (
+            Tuple[Any, Tensor, Optional[Tensor]] or
+            Tuple[Any, Tensor, Optional[Tensor], Union[Tensor, Tuple[Tensor, Tensor]]]
+    ):
+        """
+        Evaluate actions according to the current policy,
+        given the observations.
+
+        :param obs: Observation
+        :param actions: Actions
+        :return: estimated value, log likelihood of taking those actions
+            and entropy of the action distribution.
+        """
+        # Preprocess the observation if needed
+        features = self.extract_features(obs)
+        if self.share_features_extractor:
+            latent_pi, latent_vf = self.mlp_extractor(features)
+        else:
+            pi_features, vf_features = features
+            latent_pi = self.mlp_extractor.forward_actor(pi_features)
+            latent_vf = self.mlp_extractor.forward_critic(vf_features)
+        distribution = self._get_action_dist_from_latent(latent_pi)
+        log_prob = distribution.log_prob(actions)
+        values = self.value_net(latent_vf)
+        entropy = distribution.entropy()
+        if return_features:
+            return values, log_prob, entropy, features
+        return values, log_prob, entropy
 
 
 # Evaluation function
@@ -652,7 +817,7 @@ if __name__ == '__main__':
 
     # Create a dummy batch of observations with batch_size = 4
     batch_size = 4
-    dummy_observations = th.rand((batch_size, *observation_shape), dtype=th.float32)
+    dummy_observations = torch.rand((batch_size, *observation_shape), dtype=torch.float32)
 
     # Pass the dummy observations through the feature extractor
     output = feature_extractor(dummy_observations)

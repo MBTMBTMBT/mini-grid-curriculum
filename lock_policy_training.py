@@ -10,7 +10,7 @@ from binary_state_representation.binary2binaryautoencoder import Binary2BinaryEn
 from callbacks import EvalCallback, EvalSaveCallback, InfoEvalSaveCallback, SigmoidSlopeManagerCallback
 from customPPO import MLPEncoderExtractor, CustomActorCriticPolicy, TransformerEncoderExtractor
 from customize_minigrid.custom_env import CustomEnv
-from stable_baselines3.common.vec_env import DummyVecEnv, VecMonitor
+from stable_baselines3.common.vec_env import DummyVecEnv, VecMonitor, SubprocVecEnv
 from stable_baselines3.common.callbacks import CallbackList
 
 from customize_minigrid.wrappers import FullyObsSB3MLPWrapper
@@ -163,7 +163,7 @@ class LockPolicyTrainer:
 
             # Create VecMonitor for the combined training environments
             vec_train_env = VecMonitor(
-                DummyVecEnv(
+                SubprocVecEnv(
                     [lambda: make_env(each_task_config) for each_task_config in train_tasks]))
 
             train_env_list.append(vec_train_env)
@@ -267,6 +267,7 @@ class LockPolicyTrainer:
 if __name__ == '__main__':
     train_configs = []
     eval_configs = []
+    num_parallel: int = 8
 
     # ##################################################################
     # config = TaskConfig()
@@ -422,7 +423,8 @@ if __name__ == '__main__':
     config.max_steps = 500
     config.train_total_steps = 100e4
     config.difficulty_level = 0
-    train_configs.append(config)
+    for _ in range(num_parallel):
+        train_configs.append(config)
 
     config = TaskConfig()
     config.name = "0"
@@ -451,7 +453,8 @@ if __name__ == '__main__':
     config.max_steps = 500
     config.train_total_steps = 100e4
     config.difficulty_level = 1
-    train_configs.append(config)
+    for _ in range(num_parallel):
+        train_configs.append(config)
 
     config = TaskConfig()
     config.name = "1"
@@ -480,7 +483,8 @@ if __name__ == '__main__':
     config.max_steps = 500
     config.train_total_steps = 100e4
     config.difficulty_level = 2
-    train_configs.append(config)
+    for _ in range(num_parallel):
+        train_configs.append(config)
 
     config = TaskConfig()
     config.name = "2"
@@ -509,7 +513,8 @@ if __name__ == '__main__':
     config.max_steps = 500
     config.train_total_steps = 100e4
     config.difficulty_level = 3
-    train_configs.append(config)
+    for _ in range(num_parallel):
+        train_configs.append(config)
 
     config = TaskConfig()
     config.name = "3"

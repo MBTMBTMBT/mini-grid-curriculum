@@ -371,11 +371,13 @@ class SigmoidSlopeManagerCallback(EventCallback):
             self,
             feature_model: MLPEncoderExtractor or TransformerEncoderExtractor,
             total_train_steps: int,
+            log_writer: SummaryWriter,
             verbose: int = 1,
     ):
         super().__init__(verbose=verbose)
         self.feature_model = feature_model
         self.total_train_steps = total_train_steps
+        self.log_writer = log_writer
 
     def _on_step(self) -> bool:
         # Evaluate the model at specified frequency
@@ -386,4 +388,8 @@ class SigmoidSlopeManagerCallback(EventCallback):
             print("===== Start to use binary latent space! =====")
         else:
             self.feature_model.binary_output = False
+        if self.n_calls % 1e3 == 0:
+            self.log_writer.add_scalar(
+                f'sigmoid slope', self.feature_model.slope
+            )
         return True

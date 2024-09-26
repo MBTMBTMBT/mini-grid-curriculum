@@ -201,6 +201,7 @@ class Trainer:
             sigmoid_slope_manager_callback = SigmoidSlopeManagerCallback(
                 feature_model=model.policy.features_extractor,
                 total_train_steps=steps,
+                log_writer=log_writer,
             )
 
             model.policy.features_extractor.unfreeze()
@@ -317,8 +318,8 @@ if __name__ == '__main__':
         )
         runner.train(
             session_dir=f"./experiments/mazes/run{i}",
-            eval_freq=int(2e4 // num_parallel),
-            compute_info_freq=int(2e4 // num_parallel),
+            eval_freq=int(10e4 // num_parallel),
+            compute_info_freq=int(10e4 // num_parallel),
             num_eval_episodes=10,
             eval_deterministic=False,
             start_time_step=0,

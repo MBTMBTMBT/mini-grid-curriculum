@@ -421,7 +421,7 @@ if __name__ == '__main__':
     config.random_rotate = True
     config.random_flip = True
     config.max_steps = 500
-    config.train_total_steps = 100e4
+    config.train_total_steps = 25e4
     config.difficulty_level = 0
     for _ in range(num_parallel):
         train_configs.append(config)
@@ -451,7 +451,7 @@ if __name__ == '__main__':
     config.random_rotate = True
     config.random_flip = True
     config.max_steps = 500
-    config.train_total_steps = 100e4
+    config.train_total_steps = 25e4
     config.difficulty_level = 1
     for _ in range(num_parallel):
         train_configs.append(config)
@@ -481,7 +481,7 @@ if __name__ == '__main__':
     config.random_rotate = True
     config.random_flip = True
     config.max_steps = 500
-    config.train_total_steps = 100e4
+    config.train_total_steps = 25e4
     config.difficulty_level = 2
     for _ in range(num_parallel):
         train_configs.append(config)
@@ -511,7 +511,7 @@ if __name__ == '__main__':
     config.random_rotate = True
     config.random_flip = True
     config.max_steps = 500
-    config.train_total_steps = 100e4
+    config.train_total_steps = 25e4
     config.difficulty_level = 3
     for _ in range(num_parallel):
         train_configs.append(config)

@@ -222,7 +222,7 @@ class Trainer:
 if __name__ == '__main__':
     train_configs = []
     eval_configs = []
-    num_parallel: int = 4
+    num_parallel: int = 16
 
     ##################################################################
     config = TaskConfig()
@@ -235,7 +235,7 @@ if __name__ == '__main__':
     config.random_rotate = True
     config.random_flip = True
     config.max_steps = 500
-    config.train_total_steps = 1e7
+    config.train_total_steps = 1e7 // num_parallel
     config.difficulty_level = 0
     for _ in range(num_parallel):
         train_configs.append(config)

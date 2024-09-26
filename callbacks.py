@@ -391,6 +391,8 @@ class SigmoidSlopeManagerCallback(EventCallback):
             # print("===== Start to use binary latent space! =====")
         else:
             self.feature_model.binary_output = False
+        if self.feature_model.slope > 1e3:
+            self.feature_model.slope = 1e3
         if self.n_calls % int(1e3) == 0:
             self.log_writer.add_scalar(
                 f'sigmoid slope', self.feature_model.slope, self.num_timesteps + self.start_timestep

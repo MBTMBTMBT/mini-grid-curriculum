@@ -7,7 +7,7 @@ from torch import nn
 from torch.utils.tensorboard import SummaryWriter
 
 from binary_state_representation.binary2binaryautoencoder import Binary2BinaryEncoder, Binary2BinaryFeatureNet
-from callbacks import EvalCallback, EvalSaveCallback, InfoEvalSaveCallback
+from callbacks import EvalCallback, EvalSaveCallback, InfoEvalSaveCallback, SigmoidSlopeManagerCallback
 from customPPO import MLPEncoderExtractor, CustomActorCriticPolicy, TransformerEncoderExtractor
 from customize_minigrid.custom_env import CustomEnv
 from stable_baselines3.common.vec_env import DummyVecEnv, VecMonitor
@@ -209,6 +209,11 @@ class LockPolicyTrainer:
                 iter_gamma=iter_gamma,
                 iter_threshold=iter_threshold,
                 max_iter=max_iter,
+            )
+
+            sigmoid_slope_manager_callback = SigmoidSlopeManagerCallback(
+                model=model.policy.features_extractor,
+                total_train_steps=steps,
             )
 
             model.policy.features_extractor.unfreeze()

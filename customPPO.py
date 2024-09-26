@@ -53,7 +53,9 @@ class MLPEncoderExtractor(BaseFeaturesExtractor):
         # slop of last activation layer
         self.slope = 1.0
 
-    def forward(self, observations: th.Tensor, binary_output=True) -> th.Tensor:
+        self.binary_output = False
+
+    def forward(self, observations: th.Tensor) -> th.Tensor:
         # First flatten the input (same as FlattenExtractor)
         observations = observations.view(observations.size(0), -1)
         # Then pass through the encoder network
@@ -63,7 +65,7 @@ class MLPEncoderExtractor(BaseFeaturesExtractor):
         encoded = torch.sigmoid(self.slope * encoded)
 
         # Conditional output formatting based on binary_output flag
-        if binary_output:
+        if self.binary_output:
             # Output binary version using STE-like method for backprop compatibility
             encoded_binary = (encoded > 0.5).float().detach() + encoded - encoded.detach()
             return encoded_binary
@@ -152,6 +154,8 @@ class TransformerEncoderExtractor(BaseFeaturesExtractor):
         # slop of last activation layer
         self.slope = 1.0
 
+        self.binary_output = False
+
     def forward(self, observations: th.Tensor, binary_output=True) -> th.Tensor:
         # Flatten the input observations
         observations = observations.view(observations.size(0), -1)
@@ -178,7 +182,7 @@ class TransformerEncoderExtractor(BaseFeaturesExtractor):
         encoded = self.mlp(encoded)
 
         # Conditional output formatting based on binary_output flag
-        if binary_output:
+        if self.binary_output:
             # Output binary version using STE-like method for backprop compatibility
             encoded_binary = (encoded > 0.5).float().detach() + encoded - encoded.detach()
             return encoded_binary

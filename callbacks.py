@@ -1,3 +1,4 @@
+import math
 import os
 from typing import Union, List
 import statistics
@@ -14,6 +15,7 @@ from stable_baselines3.common.vec_env import VecEnv
 from torch.utils.tensorboard import SummaryWriter
 
 from binary_state_representation.binary2binaryautoencoder import Binary2BinaryEncoder
+from customPPO import MLPEncoderExtractor, TransformerEncoderExtractor
 from mdp_graph.mdp_graph import PolicyGraph
 from mdp_learner import OneHotEncodingMDPLearner
 from minigrid_abstract_encoding import EncodingMDPLearner
@@ -362,3 +364,26 @@ class InfoEvalSaveCallback(EvalSaveCallback):
                 f'free_energy_start_pos/{env_name}', start_position_free_energy,
                 self.num_timesteps + self.start_timestep
             )
+
+
+class SigmoidSlopeManagerCallback(EventCallback):
+    def __init__(
+            self,
+            model: MLPEncoderExtractor or TransformerEncoderExtractor,
+            total_train_steps: int,
+            verbose: int = 1,
+    ):
+        super().__init__(verbose=verbose)
+        self.model = model
+        self.total_train_steps = total_train_steps
+
+    def _on_step(self) -> bool:
+        # Evaluate the model at specified frequency
+        if self.n_calls / self.total_train_steps >= 0.25:
+            self.model.slope = 2.0 ** (self.n_calls / (self.total_train_steps * 0.75) / 0.1)
+        if self.model.slope >= 10.0:
+            self.model.binary_output = True
+            print("===== Start to use binary latent space! =====")
+        else:
+            self.model.binary_output = False
+        return True

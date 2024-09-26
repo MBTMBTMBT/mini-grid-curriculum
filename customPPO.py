@@ -1,4 +1,4 @@
-from typing import Callable, Optional, List, Dict, Union, Type, Generator, Tuple, Any
+from typing import Callable, Optional, List, Dict, Union, Type, Generator, Tuple, Any, NamedTuple
 
 import numpy as np
 import torch
@@ -25,8 +25,14 @@ from binary_state_representation.binary2binaryautoencoder import InvNet, Contras
 from torch.nn import functional as F
 
 
-class CustomRolloutBufferSamples(RolloutBufferSamples):
+class CustomRolloutBufferSamples(NamedTuple):
+    observations: torch.Tensor
     next_observations: torch.Tensor
+    actions: torch.Tensor
+    old_values: torch.Tensor
+    old_log_prob: torch.Tensor
+    advantages: torch.Tensor
+    returns: torch.Tensor
     rewards: torch.Tensor
     dones: torch.Tensor
 
@@ -44,20 +50,22 @@ class CustomRolloutBuffer(RolloutBuffer):
         self.next_observations = np.zeros((self.buffer_size, self.n_envs, *self.obs_shape), dtype=np.float32)
         self.dones = np.zeros((self.buffer_size, self.n_envs), dtype=bool)  # Reset the dones buffer
 
-    def add(self, *args, next_obs=None, **kwargs):
+    def add(self, *args, next_obs=None, dones=None, **kwargs):
         """
         Add a new transition to the buffer
         :param next_obs: The next observation at time t+1
+        :param dones: Done signals indicating if the episode has ended
         """
-        # Call the parent add method without next_obs
+        # Call the parent add method without next_obs and dones
         super().add(*args, **kwargs)
 
         # Store the next observation if provided
         if next_obs is not None:
-            self.next_observations[self.pos - 1] = torch.tensor(next_obs, device=self.device)
+            self.next_observations[self.pos - 1] = torch.tensor(next_obs)
 
-        # Store the done signal
-        self.dones[self.pos - 1] = self.episode_starts
+        # Store the dones if provided
+        if dones is not None:
+            self.dones[self.pos - 1] = dones
 
     def get(self, batch_size: Optional[int] = None) -> Generator[CustomRolloutBufferSamples, None, None]:
         assert self.full, "Buffer is not full"
@@ -110,6 +118,9 @@ class CustomRolloutBuffer(RolloutBuffer):
 class CustomPPO(PPO):
     def __init__(self, *args, **kwargs):
         super(CustomPPO, self).__init__(*args, **kwargs)
+
+        self.policy.features_extractor.encoder_only = False
+        self.policy.features_extractor.action_space = self.action_space
 
         self.rollout_buffer = CustomRolloutBuffer(
             buffer_size=self.n_steps,
@@ -197,7 +208,7 @@ class CustomPPO(PPO):
                 values,
                 log_probs,
                 next_obs=new_obs,  # new_obs as next_obs given to buffer
-                dones=dones  # Add dones information
+                dones=dones,  # Add dones information
             )
             self._last_obs = new_obs
             self._last_episode_starts = dones
@@ -306,7 +317,7 @@ class CustomPPO(PPO):
                     same_states = norms < 0.5
 
                     z0 = features
-                    z1 = self.policy.feature_extractor(next_obs)
+                    z1 = self.policy.features_extractor(next_obs)
 
                     # filter out the cases that the agent did not move
                     z0_filtered = z0[~same_states]
@@ -319,7 +330,7 @@ class CustomPPO(PPO):
 
                     actions_filtered = rollout_data.actions[~same_states]
 
-                    _loss = self.policy.feature_extractor.compute_loss(
+                    _loss = self.policy.features_extractor.compute_loss(
                         obs, next_obs, z0, z1, z0_filtered, z1_filtered,
                         fake_z1_filtered, rollout_data.actions, actions_filtered, rollout_data.rewards,
                         rollout_data.dones,
@@ -379,7 +390,7 @@ class CustomPPO(PPO):
 
 
 class BaseEncoderExtractor(BaseFeaturesExtractor):
-    def __init__(self, observation_space: gym.spaces.Box, slope=1.0, binary_output=False, encoder_only=True, weights=None, action_space: gym.spaces.Discrete = None):
+    def __init__(self, observation_space: gym.spaces.Box, net_arch: List[int], slope=1.0, binary_output=False, encoder_only=True, weights=None, action_space: gym.spaces.Discrete = None):
         # Initialize the base feature extractor with the flattened observation size
         super().__init__(observation_space, torch.prod(torch.tensor(observation_space.shape)).item())
 
@@ -396,50 +407,62 @@ class BaseEncoderExtractor(BaseFeaturesExtractor):
         self.termination_predictor = None
 
         self.weights = weights
+        self.action_space = action_space
 
-        if not encoder_only:
-            if weights is None:
-                self.weights = {'inv': 0.2, 'dis': 0.2, 'neighbour': 0.2, 'dec': 0.2, 'rwd': 0.2, 'terminate': 0.2}
-            assert action_space is not None, "Must specify action space."
-            n_actions = action_space.n
-            n_latent_dims = net_arch[-1]
-            if weights['inv'] > 0.0:
-                self.inv_model = InvNet(
-                    n_actions=n_actions,
-                    n_latent_dims=n_latent_dims,
-                    n_units_per_layer=1,
-                    n_hidden_layers=512,
-                )
+        self.has_set_up = False
 
-            if weights['dis'] > 0.0:
-                self.discriminator = ContrastiveNet(
-                    n_latent_dims=n_latent_dims,
-                    n_hidden_layers=1,
-                    n_units_per_layer=512,
-                )
+        self.net_arch = net_arch
 
-            if weights['dec'] > 0.0:
-                self.decoder = Binary2BinaryDecoder(
-                    n_latent_dims=n_latent_dims,
-                    output_dim=self.features_dim,
-                    n_hidden_layers=1,
-                    n_units_per_layer=512,
-                )
+        self.obs_dim = self.features_dim
 
-            if weights['rwd'] > 0.0:
-                self.reward_predictor = RewardPredictor(
-                    n_actions=n_actions,
-                    n_latent_dims=n_latent_dims,
-                    n_hidden_layers=1,
-                    n_units_per_layer=512,
-                )
+    def set_up(self):
+        if self.weights is None:
+            self.weights = {'inv': 1.0, 'dis': 1.0, 'neighbour': 0.0, 'dec': 0.0, 'rwd': 0.1, 'terminate': 1.0}
+        assert self.action_space is not None, "Must specify action space."
+        n_actions = self.action_space.n
+        n_latent_dims = self.net_arch[-1]
+        if self.weights['inv'] > 0.0:
+            self.inv_model = InvNet(
+                n_actions=n_actions,
+                n_latent_dims=n_latent_dims,
+                n_units_per_layer=1,
+                n_hidden_layers=512,
+            )
 
-            if weights['terminate'] > 0.0:
-                self.termination_predictor = TerminationPredictor(
-                    n_latent_dims=n_latent_dims,
-                    n_hidden_layers=1,
-                    n_units_per_layer=512,
-                )
+        if self.weights['dis'] > 0.0:
+            self.discriminator = ContrastiveNet(
+                n_latent_dims=n_latent_dims,
+                n_hidden_layers=1,
+                n_units_per_layer=512,
+            )
+
+        if self.weights['dec'] > 0.0:
+            self.decoder = Binary2BinaryDecoder(
+                n_latent_dims=n_latent_dims,
+                output_dim=self.obs_dim,
+                n_hidden_layers=1,
+                n_units_per_layer=512,
+            )
+
+        if self.weights['rwd'] > 0.0:
+            self.reward_predictor = RewardPredictor(
+                n_actions=n_actions,
+                n_latent_dims=n_latent_dims,
+                n_hidden_layers=1,
+                n_units_per_layer=512,
+            )
+
+        if self.weights['terminate'] > 0.0:
+            self.termination_predictor = TerminationPredictor(
+                n_latent_dims=n_latent_dims,
+                n_hidden_layers=1,
+                n_units_per_layer=512,
+            )
+
+        self.cross_entropy = torch.nn.CrossEntropyLoss()
+        self.bce_loss = torch.nn.BCELoss()
+        self.bce_loss_ = torch.nn.BCELoss(reduction="none")
+        self.mse_loss = torch.nn.MSELoss()
 
     def forward(self, observations: torch.Tensor) -> torch.Tensor:
         # First flatten the input (same as FlattenExtractor)
@@ -470,12 +493,32 @@ class BaseEncoderExtractor(BaseFeaturesExtractor):
             rewards: torch.Tensor,
             dones: torch.Tensor,
     ) -> torch.Tensor:
+        if not self.has_set_up:
+            self.set_up()
         device = next(self.parameters()).device
         if self.encoder_only:
             return torch.tensor(0.0).to(device)
 
+        obs = obs.to(device)
+        next_obs = next_obs.to(device)
+        z0 = z0.to(device)
+        z1 = z1.to(device)
+        z0_filtered = z0_filtered.to(device)
+        z1_filtered = z1_filtered.to(device)
+        fake_z1_filtered = fake_z1_filtered.to(device)
+        actions = actions.to(device)
+        actions_filtered = actions_filtered.to(device)
+        rewards = rewards.to(device)
+        dones = dones.to(device)
+
+        self.cross_entropy = self.cross_entropy.to(device)
+        self.bce_loss = self.bce_loss.to(device)
+        self.bce_loss_ = self.bce_loss_.to(device)
+        self.mse_loss = self.mse_loss.to(device)
+
         rec_loss = torch.tensor(0.0).to(device)
         if self.decoder:
+            self.decoder = self.decoder.to(device)
             # compute reconstruct loss
             decoded_z0 = self.decoder(z0)
             decoded_z1 = self.decoder(z1)
@@ -486,12 +529,14 @@ class BaseEncoderExtractor(BaseFeaturesExtractor):
 
         inv_loss = torch.tensor(0.0).to(device)
         if self.inv_model:
+            self.inv_model = self.inv_model.to(device)
             if z0_filtered.size(0) > 0:
                 pred_actions = self.inv_model(z0_filtered, z1_filtered)
-                inv_loss = self.cross_entropy(pred_actions, actions_filtered)
+                inv_loss = self.cross_entropy(pred_actions, actions_filtered.squeeze().type(torch.int64))
 
         ratio_loss = torch.tensor(0.0).to(device)
         if self.discriminator:
+            self.discriminator = self.discriminator.to(device)
             labels = torch.cat((
                 torch.ones(len(z1_filtered), device=z1_filtered.device),
                 torch.zeros(len(fake_z1_filtered), device=fake_z1_filtered.device),
@@ -504,15 +549,17 @@ class BaseEncoderExtractor(BaseFeaturesExtractor):
 
         reward_loss = torch.tensor(0.0).to(device)
         if self.reward_predictor:
+            self.reward_predictor = self.reward_predictor.to(device)
             # compute reward loss
-            pred_rwds = self.reward_predictor(z0, actions, z1).squeeze()
+            pred_rwds = self.reward_predictor(z0, actions.type(torch.int64).squeeze(), z1).squeeze()
             reward_loss = self.mse_loss(pred_rwds, rewards)
 
         terminate_loss = torch.tensor(0.0).to(device)
         if self.termination_predictor:
+            self.termination_predictor = self.termination_predictor.to(device)
             # compute terminate loss
             pred_terminated = self.termination_predictor(z1).squeeze()
-            terminate_loss = self.bce_loss(pred_terminated, dones)
+            terminate_loss = self.bce_loss(pred_terminated, dones.type(torch.float32))
 
         # compute neighbour loss
         distances = torch.abs(z0 - z1) * 0.1
@@ -523,7 +570,7 @@ class BaseEncoderExtractor(BaseFeaturesExtractor):
         neighbour_loss = torch.mean(torch.pow(weighted_distance, 2))
 
         # compute total loss
-        loss = torch.tensor(0.0).to(self.device)
+        loss = torch.tensor(0.0).to(device)
         loss += rec_loss * self.weights['dec']
         loss += inv_loss * self.weights['inv']
         loss += ratio_loss * self.weights['dis']
@@ -557,11 +604,12 @@ class BaseEncoderExtractor(BaseFeaturesExtractor):
 class MLPEncoderExtractor(BaseEncoderExtractor):
     def __init__(self, observation_space: gym.spaces.Box, net_arch=None, activation_fn=nn.ReLU, encoder_only=True,
                  action_space: gym.spaces.Discrete = None, weights=None,):
-        super().__init__(observation_space, encoder_only=encoder_only, action_space=action_space, weights=weights)
-
         # Build the encoder network layers
         if net_arch is None:
             net_arch = [64, 64]
+
+        super().__init__(observation_space, net_arch=net_arch, encoder_only=encoder_only, action_space=action_space, weights=weights)
+
         input_dim = self.features_dim  # Flattened observation dimension
         layers = []
         for layer_size in net_arch[:-1]:
@@ -586,7 +634,11 @@ class MLPEncoderExtractor(BaseEncoderExtractor):
 class TransformerEncoderExtractor(BaseEncoderExtractor):
     def __init__(self, observation_space: gym.spaces.Box, net_arch=None, num_transformer_layers=2, n_heads=8,
                  activation_fn=nn.ReLU, encoder_only=True, action_space: gym.spaces.Discrete = None, weights=None):
-        super().__init__(observation_space, encoder_only=encoder_only, action_space=action_space, weights=weights)
+        # Define the MLP layers according to net_arch
+        if net_arch is None:
+            net_arch = [128, 64]
+
+        super().__init__(observation_space, net_arch=net_arch, encoder_only=encoder_only, action_space=action_space, weights=weights)
 
         # Set the input sequence length and model dimension (d_model) to match the input
         self.seq_length = self.features_dim
@@ -605,9 +657,6 @@ class TransformerEncoderExtractor(BaseEncoderExtractor):
                                                    batch_first=True)
         self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_transformer_layers)
 
-        # Define the MLP layers according to net_arch
-        if net_arch is None:
-            net_arch = [128, 64]
         mlp_layers = []
         input_dim = d_model  # Start with the output dimension of the Transformer layers
         for layer_size in net_arch[:-1]:

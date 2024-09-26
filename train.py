@@ -8,7 +8,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 from binary_state_representation.binary2binaryautoencoder import Binary2BinaryEncoder, Binary2BinaryFeatureNet
 from callbacks import EvalCallback, EvalSaveCallback, InfoEvalSaveCallback, SigmoidSlopeManagerCallback
-from customPPO import MLPEncoderExtractor, CustomActorCriticPolicy, TransformerEncoderExtractor
+from customPPO import MLPEncoderExtractor, CustomActorCriticPolicy, TransformerEncoderExtractor, CustomPPO
 from customize_minigrid.custom_env import CustomEnv
 from stable_baselines3.common.vec_env import DummyVecEnv, VecMonitor, SubprocVecEnv
 from stable_baselines3.common.callbacks import CallbackList
@@ -175,9 +175,9 @@ class Trainer:
 
             if load_path and os.path.exists(load_path):
                 print(f"Loading the model from {load_path}...")
-                model = PPO.load(load_path, env=env)
+                model = CustomPPO.load(load_path, env=env)
             else:
-                model = PPO(CustomActorCriticPolicy, env=env, policy_kwargs=self.policy_kwargs, verbose=1)
+                model = CustomPPO(CustomActorCriticPolicy, env=env, policy_kwargs=self.policy_kwargs, verbose=1)
                 print("Initialized new model.")
                 load_path = os.path.join(model_save_dir, f"saved_model_latest.zip")
 
@@ -225,7 +225,7 @@ class Trainer:
 if __name__ == '__main__':
     train_configs = []
     eval_configs = []
-    num_parallel: int = 16
+    num_parallel: int = 8
 
     ##################################################################
     config = TaskConfig()

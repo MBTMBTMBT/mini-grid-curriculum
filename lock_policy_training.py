@@ -536,7 +536,7 @@ if __name__ == '__main__':
                 features_extractor_class=TransformerEncoderExtractor,  # Use the custom encoder extractor
                 features_extractor_kwargs=dict(
                     net_arch=[32],  # Custom layer sizes
-                    num_transformer_layers=4,
+                    num_transformer_layers=1,
                     n_heads=8,
                     activation_fn=nn.LeakyReLU  # Activation function
                 ),

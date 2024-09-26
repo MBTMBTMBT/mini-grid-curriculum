@@ -222,7 +222,7 @@ class Trainer:
 if __name__ == '__main__':
     train_configs = []
     eval_configs = []
-    num_parallel: int = 16
+    num_parallel: int = 20
 
     ##################################################################
     config = TaskConfig()

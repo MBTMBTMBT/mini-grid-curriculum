@@ -326,7 +326,7 @@ class CustomPPO(PPO):
 
 
 class BaseEncoderExtractor(BaseFeaturesExtractor):
-    def __init__(self, observation_space: gym.spaces.Box, activation_fn=nn.ReLU, slope=1.0, binary_output=False):
+    def __init__(self, observation_space: gym.spaces.Box, slope=1.0, binary_output=False, encoder_only=True, weights=None, action_space: gym.spaces.Discrete = None):
         # Initialize the base feature extractor with the flattened observation size
         super().__init__(observation_space, th.prod(th.tensor(observation_space.shape)).item())
 
@@ -334,6 +334,53 @@ class BaseEncoderExtractor(BaseFeaturesExtractor):
         self.slope = slope
         self.binary_output = binary_output
         self.frozen = False
+
+        self.inv_model = None
+        self.discriminator = None
+        self.decoder = None
+        self.reward_predictor = None
+        self.termination_predictor = None
+
+        if not encoder_only:
+            if weights is None:
+                weights = {'inv': 0.2, 'dis': 0.2, 'neighbour': 0.2, 'dec': 0.2, 'rwd': 0.2, 'terminate': 0.2}
+            if weights['inv'] > 0.0:
+                self.inv_model = InvNet(
+                    n_actions=n_actions,
+                    n_latent_dims=n_latent_dims,
+                    n_units_per_layer=1,
+                    n_hidden_layers=512,
+                ).to(device)
+
+            if weights['dis'] > 0.0:
+                self.discriminator = ContrastiveNet(
+                    n_latent_dims=n_latent_dims,
+                    n_hidden_layers=1,
+                    n_units_per_layer=512,
+                ).to(device)
+
+            if weights['dec'] > 0.0:
+                self.decoder = Binary2BinaryDecoder(
+                    n_latent_dims=n_latent_dims,
+                    output_dim=n_obs_dims,
+                    n_hidden_layers=1,
+                    n_units_per_layer=512,
+                ).to(device)
+
+            if weights['rwd'] > 0.0:
+                self.reward_predictor = RewardPredictor(
+                    n_actions=n_actions,
+                    n_latent_dims=n_latent_dims,
+                    n_hidden_layers=1,
+                    n_units_per_layer=512,
+                ).to(device)
+
+            if weights['terminate'] > 0.0:
+                self.termination_predictor = TerminationPredictor(
+                    n_latent_dims=n_latent_dims,
+                    n_hidden_layers=1,
+                    n_units_per_layer=512,
+                ).to(device)
 
     def forward(self, observations: th.Tensor) -> th.Tensor:
         # First flatten the input (same as FlattenExtractor)
@@ -372,8 +419,9 @@ class BaseEncoderExtractor(BaseFeaturesExtractor):
 
 
 class MLPEncoderExtractor(BaseEncoderExtractor):
-    def __init__(self, observation_space: gym.spaces.Box, net_arch=None, activation_fn=nn.ReLU):
-        super().__init__(observation_space, activation_fn=activation_fn)
+    def __init__(self, observation_space: gym.spaces.Box, net_arch=None, activation_fn=nn.ReLU, encoder_only=True,
+                 action_space: gym.spaces.Discrete = None, weights=None,):
+        super().__init__(observation_space, encoder_only=encoder_only, action_space=action_space, weights=weights)
 
         # Build the encoder network layers
         if net_arch is None:
@@ -401,8 +449,8 @@ class MLPEncoderExtractor(BaseEncoderExtractor):
 
 class TransformerEncoderExtractor(BaseEncoderExtractor):
     def __init__(self, observation_space: gym.spaces.Box, net_arch=None, num_transformer_layers=2, n_heads=8,
-                 activation_fn=nn.ReLU):
-        super().__init__(observation_space, activation_fn=activation_fn)
+                 activation_fn=nn.ReLU, encoder_only=True, action_space: gym.spaces.Discrete = None, weights=None):
+        super().__init__(observation_space, encoder_only=encoder_only, action_space=action_space, weights=weights)
 
         # Set the input sequence length and model dimension (d_model) to match the input
         self.seq_length = self.features_dim

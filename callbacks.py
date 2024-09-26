@@ -369,21 +369,21 @@ class InfoEvalSaveCallback(EvalSaveCallback):
 class SigmoidSlopeManagerCallback(EventCallback):
     def __init__(
             self,
-            model: MLPEncoderExtractor or TransformerEncoderExtractor,
+            feature_model: MLPEncoderExtractor or TransformerEncoderExtractor,
             total_train_steps: int,
             verbose: int = 1,
     ):
         super().__init__(verbose=verbose)
-        self.model = model
+        self.feature_model = feature_model
         self.total_train_steps = total_train_steps
 
     def _on_step(self) -> bool:
         # Evaluate the model at specified frequency
         if self.n_calls / self.total_train_steps >= 0.5:
-            self.model.slope = 2.0 ** ((self.n_calls + 1 - (self.total_train_steps * 0.5)) / (self.total_train_steps * 0.5) / 0.1)
-        if self.model.slope >= 10.0:
-            self.model.binary_output = True
+            self.feature_model.slope = 2.0 ** ((self.n_calls + 1 - (self.total_train_steps * 0.5)) / (self.total_train_steps * 0.5) / 0.1)
+        if self.feature_model.slope >= 10.0:
+            self.feature_model.binary_output = True
             print("===== Start to use binary latent space! =====")
         else:
-            self.model.binary_output = False
+            self.feature_model.binary_output = False
         return True

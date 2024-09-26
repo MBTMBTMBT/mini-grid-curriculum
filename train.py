@@ -199,7 +199,7 @@ class Trainer:
             )
 
             sigmoid_slope_manager_callback = SigmoidSlopeManagerCallback(
-                model=model.policy.features_extractor,
+                feature_model=model.policy.features_extractor,
                 total_train_steps=steps,
             )
 

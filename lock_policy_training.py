@@ -212,7 +212,7 @@ class LockPolicyTrainer:
             )
 
             sigmoid_slope_manager_callback = SigmoidSlopeManagerCallback(
-                model=model.policy.features_extractor,
+                feature_model=model.policy.features_extractor,
                 total_train_steps=steps,
             )
 
@@ -251,7 +251,7 @@ class LockPolicyTrainer:
                 max_iter=max_iter,
             )
             _sigmoid_slope_manager_callback = SigmoidSlopeManagerCallback(
-                model=model.policy.features_extractor,
+                feature_model=model.policy.features_extractor,
                 total_train_steps=each_task_config.train_total_steps,
             )
 

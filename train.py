@@ -320,8 +320,8 @@ if __name__ == '__main__':
         )
         runner.train(
             session_dir=f"./experiments/mazes/run{i}",
-            eval_freq=int(10e4 // num_parallel),
-            compute_info_freq=int(10e4 // num_parallel),
+            eval_freq=int(25e4),
+            compute_info_freq=int(25e4),
             num_eval_episodes=10,
             eval_deterministic=False,
             start_time_step=0,

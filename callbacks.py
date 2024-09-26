@@ -389,8 +389,8 @@ class SigmoidSlopeManagerCallback(EventCallback):
         if self.feature_model.slope > 10.0:
             self.feature_model.binary_output = True
             # print("===== Start to use binary latent space! =====")
-        else:
-            self.feature_model.binary_output = False
+        # else:
+        #     self.feature_model.binary_output = False
         if self.feature_model.slope > 5e2:
             self.feature_model.slope = 5e2
         if self.n_calls % int(1e3) == 0:

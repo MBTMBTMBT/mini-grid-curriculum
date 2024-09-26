@@ -12,6 +12,53 @@ from stable_baselines3.common.policies import ActorCriticPolicy
 from stable_baselines3.common.env_util import make_vec_env
 from torch.distributions import Categorical, Normal
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
+from stable_baselines3.common.buffers import RolloutBuffer
+
+
+class CustomRolloutBuffer(RolloutBuffer):
+    def __init__(self, buffer_size, observation_space, action_space, device='cpu', gamma=0.99, gae_lambda=0.95):
+        super().__init__(buffer_size, observation_space, action_space, device, gamma, gae_lambda)
+
+        # Additional buffer to store next observations
+        self.next_observations = th.zeros((buffer_size,) + observation_space.shape, device=device)
+
+    def add(self, *args, next_obs=None, **kwargs):
+        """
+        Add a new transition to the buffer
+        :param next_obs: The next observation at time t+1
+        """
+        # Call the parent add method without next_obs
+        super().add(*args, **kwargs)
+
+        # Store the next observation if provided
+        if next_obs is not None:
+            self.next_observations[self.pos - 1] = th.tensor(next_obs, device=self.device)
+
+    def get(self, batch_size=None):
+        """
+        Yield mini-batches from the buffer, including next observations.
+        """
+        assert self.full, "Cannot sample from a partially filled buffer"
+
+        # Shuffle indices
+        indices = np.random.permutation(self.buffer_size)
+
+        start_idx = 0
+        while start_idx < self.buffer_size:
+            end_idx = start_idx + batch_size if batch_size else self.buffer_size
+            batch_indices = indices[start_idx:end_idx]
+
+            yield {
+                "observations": self.observations[batch_indices],
+                "next_observations": self.next_observations[batch_indices],
+                "actions": self.actions[batch_indices],
+                "values": self.values[batch_indices],
+                "log_probs": self.log_probs[batch_indices],
+                "advantages": self.advantages[batch_indices],
+                "returns": self.returns[batch_indices],
+            }
+
+            start_idx = end_idx
 
 
 class MLPEncoderExtractor(BaseFeaturesExtractor):

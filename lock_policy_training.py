@@ -96,6 +96,7 @@ class LockPolicyTrainer:
             compute_info_freq: int,
             num_eval_episodes: int,
             eval_deterministic: bool,
+            num_parallel: int,
             start_time_step: int = 0,
             load_path: str or None = None,
             iter_gamma: float = 0.999,
@@ -183,7 +184,7 @@ class LockPolicyTrainer:
 
             # get environment for this round
             env = train_env_list[i]
-            steps = train_env_step_list[i]
+            steps = train_env_step_list[i] // num_parallel
 
             if load_path and os.path.exists(load_path):
                 print(f"Loading the model from {load_path}...")
@@ -200,8 +201,8 @@ class LockPolicyTrainer:
                 model_save_dir=model_save_dir,
                 model_save_name=f"saved_model",
                 log_writer=log_writer,
-                eval_freq=eval_freq,
-                compute_info_freq=compute_info_freq,
+                eval_freq=eval_freq // num_parallel,
+                compute_info_freq=compute_info_freq // num_parallel,
                 n_eval_episodes=num_eval_episodes,
                 deterministic=eval_deterministic,
                 verbose=1,
@@ -213,7 +214,7 @@ class LockPolicyTrainer:
 
             sigmoid_slope_manager_callback = SigmoidSlopeManagerCallback(
                 feature_model=model.policy.features_extractor,
-                total_train_steps=steps,
+                total_train_steps=steps // num_parallel,
                 log_writer=log_writer,
                 start_timestep=start_time_step,
             )
@@ -242,8 +243,8 @@ class LockPolicyTrainer:
                 model_save_dir=model_save_dir,
                 model_save_name=eval_env_name + "_policy_frozen",
                 log_writer=log_writer,
-                eval_freq=eval_freq,
-                compute_info_freq=compute_info_freq,
+                eval_freq=eval_freq // num_parallel,
+                compute_info_freq=compute_info_freq // num_parallel,
                 n_eval_episodes=num_eval_episodes,
                 deterministic=eval_deterministic,
                 verbose=1,
@@ -254,7 +255,7 @@ class LockPolicyTrainer:
             )
             _sigmoid_slope_manager_callback = SigmoidSlopeManagerCallback(
                 feature_model=model.policy.features_extractor,
-                total_train_steps=each_task_config.train_total_steps,
+                total_train_steps=each_task_config.train_total_steps // num_parallel,
                 log_writer=log_writer,
                 start_timestep=start_time_step,
             )
@@ -425,7 +426,7 @@ if __name__ == '__main__':
     config.random_rotate = True
     config.random_flip = True
     config.max_steps = 500
-    config.train_total_steps = 100e4 // num_parallel
+    config.train_total_steps = 100e4
     config.difficulty_level = 0
     for _ in range(num_parallel):
         train_configs.append(config)
@@ -455,7 +456,7 @@ if __name__ == '__main__':
     config.random_rotate = True
     config.random_flip = True
     config.max_steps = 500
-    config.train_total_steps = 100e4 // num_parallel
+    config.train_total_steps = 100e4
     config.difficulty_level = 1
     for _ in range(num_parallel):
         train_configs.append(config)
@@ -485,7 +486,7 @@ if __name__ == '__main__':
     config.random_rotate = True
     config.random_flip = True
     config.max_steps = 500
-    config.train_total_steps = 100e4 // num_parallel
+    config.train_total_steps = 100e4
     config.difficulty_level = 2
     for _ in range(num_parallel):
         train_configs.append(config)
@@ -515,7 +516,7 @@ if __name__ == '__main__':
     config.random_rotate = True
     config.random_flip = True
     config.max_steps = 500
-    config.train_total_steps = 100e4 // num_parallel
+    config.train_total_steps = 100e4
     config.difficulty_level = 3
     for _ in range(num_parallel):
         train_configs.append(config)
@@ -559,12 +560,13 @@ if __name__ == '__main__':
         )
         runner.train(
             session_dir=f"./experiments/mazes/run{i}",
-            eval_freq=int(10e4 // num_parallel),
-            compute_info_freq=int(10e4 // num_parallel),
+            eval_freq=int(10e4),
+            compute_info_freq=int(10e4),
             num_eval_episodes=10,
             eval_deterministic=False,
             start_time_step=0,
             iter_gamma=0.999,
             iter_threshold=1e-5,
             max_iter=int(1e5),
+            num_parallel=num_parallel
         )

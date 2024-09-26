@@ -94,6 +94,7 @@ class Trainer:
             compute_info_freq: int,
             num_eval_episodes: int,
             eval_deterministic: bool,
+            num_parallel: int,
             start_time_step: int = 0,
             load_path: str or None = None,
             iter_gamma: float = 0.999,
@@ -170,7 +171,7 @@ class Trainer:
 
             # get environment for this round
             env = train_env_list[i]
-            steps = train_env_step_list[i]
+            steps = train_env_step_list[i] // num_parallel
 
             if load_path and os.path.exists(load_path):
                 print(f"Loading the model from {load_path}...")
@@ -187,8 +188,8 @@ class Trainer:
                 model_save_dir=model_save_dir,
                 model_save_name=f"saved_model",
                 log_writer=log_writer,
-                eval_freq=eval_freq,
-                compute_info_freq=compute_info_freq,
+                eval_freq=eval_freq // num_parallel,
+                compute_info_freq=compute_info_freq // num_parallel,
                 n_eval_episodes=num_eval_episodes,
                 deterministic=eval_deterministic,
                 verbose=1,
@@ -200,7 +201,7 @@ class Trainer:
 
             sigmoid_slope_manager_callback = SigmoidSlopeManagerCallback(
                 feature_model=model.policy.features_extractor,
-                total_train_steps=steps,
+                total_train_steps=steps // num_parallel,
                 log_writer=log_writer,
                 start_timestep=start_time_step,
             )
@@ -237,7 +238,7 @@ if __name__ == '__main__':
     config.random_rotate = True
     config.random_flip = True
     config.max_steps = 500
-    config.train_total_steps = 1e7 // num_parallel
+    config.train_total_steps = 1e7
     config.difficulty_level = 0
     for _ in range(num_parallel):
         train_configs.append(config)
@@ -327,4 +328,5 @@ if __name__ == '__main__':
             iter_gamma=0.999,
             iter_threshold=1e-5,
             max_iter=int(1e5),
+            num_parallel=num_parallel,
         )

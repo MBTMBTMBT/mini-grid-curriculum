@@ -383,11 +383,12 @@ class SigmoidSlopeManagerCallback(EventCallback):
 
     def _on_step(self) -> bool:
         # Evaluate the model at specified frequency
-        if self.n_calls / self.total_train_steps >= 0.5:
+        print(self.n_calls, self.total_train_steps, 2.0 ** ((self.n_calls + 1 - (self.total_train_steps * 0.5)) / (self.total_train_steps * 0.5)) / 0.125)
+        if self.n_calls / self.total_train_steps > 0.5:
             self.feature_model.slope = 2.0 ** ((self.n_calls + 1 - (self.total_train_steps * 0.5)) / (self.total_train_steps * 0.5) / 0.05)
-        if self.feature_model.slope >= 10.0:
+        if self.feature_model.slope > 10.0:
             self.feature_model.binary_output = True
-            print("===== Start to use binary latent space! =====")
+            # print("===== Start to use binary latent space! =====")
         else:
             self.feature_model.binary_output = False
         if self.n_calls % int(1e3) == 0:

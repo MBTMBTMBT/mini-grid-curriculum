@@ -267,7 +267,7 @@ class LockPolicyTrainer:
 if __name__ == '__main__':
     train_configs = []
     eval_configs = []
-    num_parallel: int = 8
+    num_parallel: int = 12
 
     # ##################################################################
     # config = TaskConfig()
@@ -421,7 +421,7 @@ if __name__ == '__main__':
     config.random_rotate = True
     config.random_flip = True
     config.max_steps = 500
-    config.train_total_steps = 25e4
+    config.train_total_steps = 100e4 // num_parallel
     config.difficulty_level = 0
     for _ in range(num_parallel):
         train_configs.append(config)
@@ -451,7 +451,7 @@ if __name__ == '__main__':
     config.random_rotate = True
     config.random_flip = True
     config.max_steps = 500
-    config.train_total_steps = 25e4
+    config.train_total_steps = 100e4 // num_parallel
     config.difficulty_level = 1
     for _ in range(num_parallel):
         train_configs.append(config)
@@ -481,7 +481,7 @@ if __name__ == '__main__':
     config.random_rotate = True
     config.random_flip = True
     config.max_steps = 500
-    config.train_total_steps = 25e4
+    config.train_total_steps = 100e4 // num_parallel
     config.difficulty_level = 2
     for _ in range(num_parallel):
         train_configs.append(config)
@@ -511,7 +511,7 @@ if __name__ == '__main__':
     config.random_rotate = True
     config.random_flip = True
     config.max_steps = 500
-    config.train_total_steps = 25e4
+    config.train_total_steps = 100e4 // num_parallel
     config.difficulty_level = 3
     for _ in range(num_parallel):
         train_configs.append(config)
@@ -555,8 +555,8 @@ if __name__ == '__main__':
         )
         runner.train(
             session_dir=f"./experiments/mazes/run{i}",
-            eval_freq=int(2e4),
-            compute_info_freq=int(2e4),
+            eval_freq=int(2e4 // num_parallel),
+            compute_info_freq=int(2e4 // num_parallel),
             num_eval_episodes=10,
             eval_deterministic=False,
             start_time_step=0,

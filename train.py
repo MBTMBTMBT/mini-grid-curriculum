@@ -202,6 +202,7 @@ class Trainer:
                 feature_model=model.policy.features_extractor,
                 total_train_steps=steps,
                 log_writer=log_writer,
+                start_timestep=start_time_step,
             )
 
             model.policy.features_extractor.unfreeze()

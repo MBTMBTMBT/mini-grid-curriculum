@@ -215,6 +215,7 @@ class LockPolicyTrainer:
                 feature_model=model.policy.features_extractor,
                 total_train_steps=steps,
                 log_writer=log_writer,
+                start_timestep=start_time_step,
             )
 
             model.policy.features_extractor.unfreeze()
@@ -254,6 +255,8 @@ class LockPolicyTrainer:
             _sigmoid_slope_manager_callback = SigmoidSlopeManagerCallback(
                 feature_model=model.policy.features_extractor,
                 total_train_steps=each_task_config.train_total_steps,
+                log_writer=log_writer,
+                start_timestep=start_time_step,
             )
 
             _callback_list = CallbackList(callbacks=[_info_eval_callback, _sigmoid_slope_manager_callback])

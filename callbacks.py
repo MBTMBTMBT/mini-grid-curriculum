@@ -373,11 +373,13 @@ class SigmoidSlopeManagerCallback(EventCallback):
             total_train_steps: int,
             log_writer: SummaryWriter,
             verbose: int = 1,
+            start_timestep: int = 0,
     ):
         super().__init__(verbose=verbose)
         self.feature_model = feature_model
         self.total_train_steps = total_train_steps
         self.log_writer = log_writer
+        self.start_timestep = start_timestep
 
     def _on_step(self) -> bool:
         # Evaluate the model at specified frequency
@@ -390,6 +392,6 @@ class SigmoidSlopeManagerCallback(EventCallback):
             self.feature_model.binary_output = False
         if self.n_calls % int(1e3) == 0:
             self.log_writer.add_scalar(
-                f'sigmoid slope', self.feature_model.slope
+                f'sigmoid slope', self.feature_model.slope, self.num_timesteps + self.start_timestep
             )
         return True

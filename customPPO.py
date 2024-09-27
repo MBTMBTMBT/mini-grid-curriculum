@@ -117,7 +117,7 @@ class CustomRolloutBuffer(RolloutBuffer):
 
 
 class CustomPPO(PPO):
-    def __init__(self, *args, log_path: str, **kwargs):
+    def __init__(self, *args, log_dir: str, **kwargs):
         super(CustomPPO, self).__init__(*args, **kwargs)
 
         self.policy.features_extractor.encoder_only = False
@@ -133,7 +133,7 @@ class CustomPPO(PPO):
             n_envs=self.n_envs,
         )
 
-        self.log_path = log_path
+        self.log_dir = log_dir
         self.train_counter = 0
 
     def collect_rollouts(
@@ -238,7 +238,7 @@ class CustomPPO(PPO):
         """
         Update policy using the currently gathered rollout buffer with support for `next_obs`.
         """
-        log_writer = SummaryWriter(self.log_path)
+        log_writer = SummaryWriter(self.log_dir)
 
         # Switch to train mode (this affects batch norm / dropout)
         self.policy.set_training_mode(True)

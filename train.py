@@ -176,8 +176,9 @@ class Trainer:
             if load_path and os.path.exists(load_path):
                 print(f"Loading the model from {load_path}...")
                 model = CustomPPO.load(load_path, env=env)
+                model.log_dir = log_dir
             else:
-                model = CustomPPO(CustomActorCriticPolicy, env=env, policy_kwargs=self.policy_kwargs, verbose=1, log_path=load_path)
+                model = CustomPPO(CustomActorCriticPolicy, env=env, policy_kwargs=self.policy_kwargs, verbose=1, log_dir=log_dir)
                 print("Initialized new model.")
                 load_path = os.path.join(model_save_dir, f"saved_model_latest.zip")
 

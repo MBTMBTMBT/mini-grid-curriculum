@@ -117,7 +117,7 @@ class CustomRolloutBuffer(RolloutBuffer):
 
 
 class CustomPPO(PPO):
-    def __init__(self, *args, log_writer: SummaryWriter, **kwargs):
+    def __init__(self, *args, log_path: str, **kwargs):
         super(CustomPPO, self).__init__(*args, **kwargs)
 
         self.policy.features_extractor.encoder_only = False
@@ -133,7 +133,7 @@ class CustomPPO(PPO):
             n_envs=self.n_envs,
         )
 
-        self.log_writer = log_writer
+        self.log_path = log_path
         self.train_counter = 0
 
     def collect_rollouts(
@@ -238,6 +238,8 @@ class CustomPPO(PPO):
         """
         Update policy using the currently gathered rollout buffer with support for `next_obs`.
         """
+        log_writer = SummaryWriter(self.log_path)
+
         # Switch to train mode (this affects batch norm / dropout)
         self.policy.set_training_mode(True)
         # Update optimizer learning rate
@@ -346,7 +348,7 @@ class CustomPPO(PPO):
                     names = ['feature_loss', 'rec_loss', 'inv_loss', 'ratio_loss', 'reward_loss', 'terminate_loss',
                              'neighbour_loss']
                     for name, val in zip(names, loss_vals):
-                        self.log_writer.add_scalar(name, val, self.train_counter)
+                        log_writer.add_scalar(name, val, self.train_counter)
 
                     loss += _loss
                 else:
@@ -371,6 +373,7 @@ class CustomPPO(PPO):
                     # Clip grad norm
                     torch.nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)
                     self.policy.optimizer.step()
+                    log_writer.close()
                     break
 
                 # Optimization step
@@ -380,10 +383,11 @@ class CustomPPO(PPO):
                 torch.nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)
                 self.policy.optimizer.step()
 
-                self.log_writer.add_scalar("loss", loss.detach().cpu().item(), self.train_counter - 1)
+                log_writer.add_scalar("loss", loss.detach().cpu().item(), self.train_counter - 1)
 
             self._n_updates += 1
             if not continue_training:
+                log_writer.close()
                 break
 
         explained_var = explained_variance(self.rollout_buffer.values.flatten(), self.rollout_buffer.returns.flatten())
@@ -403,6 +407,8 @@ class CustomPPO(PPO):
         self.logger.record("train/clip_range", clip_range)
         if self.clip_range_vf is not None:
             self.logger.record("train/clip_range_vf", clip_range_vf)
+
+        log_writer.close()
 
 
 class BaseEncoderExtractor(BaseFeaturesExtractor):

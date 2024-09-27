@@ -311,8 +311,8 @@ if __name__ == '__main__':
                 features_extractor_class=TransformerEncoderExtractor,  # Use the custom encoder extractor
                 features_extractor_kwargs=dict(
                     net_arch=[32],  # Custom layer sizes
-                    num_transformer_layers=4,
-                    n_heads=16,
+                    num_transformer_layers=2,
+                    n_heads=8,
                     activation_fn=nn.LeakyReLU  # Activation function
                 ),
                 net_arch=dict(pi=[32, 128, 128], vf=[32, 128, 128]),  # Policy and value network architecture

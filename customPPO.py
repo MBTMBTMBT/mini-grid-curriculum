@@ -194,19 +194,20 @@ class CustomPPO(PPO):
             if isinstance(self.action_space, spaces.Discrete):
                 actions = actions.reshape(-1, 1)
 
-            # Handle timeout by bootstrapping with the value function
+            # Correct the `dones` array to handle truncated episodes
+            corrected_dones = dones.copy()  # Create a copy of dones to store the corrected dones
             for idx, done in enumerate(dones):
-                if (
-                        done
-                        and infos[idx].get("terminal_observation") is not None
-                        and infos[idx].get("TimeLimit.truncated", False)
-                ):
+                if done and infos[idx].get("TimeLimit.truncated", False):
+                    # If it's a truncated episode, set done to False to avoid incorrect terminal state handling
+                    corrected_dones[idx] = False
+
+                    # Handle bootstrapping with value function for truncated episodes
                     terminal_obs = self.policy.obs_to_tensor(infos[idx]["terminal_observation"])[0]
                     with torch.no_grad():
                         terminal_value = self.policy.predict_values(terminal_obs)[0]
                     rewards[idx] += self.gamma * terminal_value
 
-            # Add data to the CustomRolloutBuffer, including next_obs and dones
+            # Add data to the CustomRolloutBuffer, using `corrected_dones` instead of `dones`
             rollout_buffer.add(
                 self._last_obs,  # actual current observation
                 actions,
@@ -215,24 +216,24 @@ class CustomPPO(PPO):
                 values,
                 log_probs,
                 next_obs=new_obs,  # new_obs as next_obs given to buffer
-                dones=dones,  # Add dones information
+                dones=corrected_dones,  # Use the corrected `corrected_dones` here
             )
+
             self._last_obs = new_obs
-            self._last_episode_starts = dones
+            self._last_episode_starts = dones  # Keep the original `dones` to properly reset the episode start
 
         with torch.no_grad():
             # Compute value for the last timestep
             values = self.policy.predict_values(obs_as_tensor(new_obs, self.device))
 
         # Compute the returns and advantages
-        rollout_buffer.compute_returns_and_advantage(last_values=values, dones=dones)
+        rollout_buffer.compute_returns_and_advantage(last_values=values, dones=corrected_dones)
 
         callback.update_locals(locals())
 
         callback.on_rollout_end()
 
         return True
-
 
     def train(self) -> None:
         """

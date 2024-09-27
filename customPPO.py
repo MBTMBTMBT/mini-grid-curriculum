@@ -18,6 +18,7 @@ from torch import Tensor
 from torch.distributions import Categorical, Normal
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 from stable_baselines3.common.buffers import RolloutBuffer
+from torch.utils.tensorboard import SummaryWriter
 
 from binary_state_representation.binary2binaryautoencoder import InvNet, ContrastiveNet, Binary2BinaryDecoder, \
     RewardPredictor, TerminationPredictor
@@ -116,7 +117,7 @@ class CustomRolloutBuffer(RolloutBuffer):
 
 
 class CustomPPO(PPO):
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, log_writer: SummaryWriter, **kwargs):
         super(CustomPPO, self).__init__(*args, **kwargs)
 
         self.policy.features_extractor.encoder_only = False
@@ -131,6 +132,9 @@ class CustomPPO(PPO):
             gae_lambda=self.gae_lambda,
             n_envs=self.n_envs,
         )
+
+        self.log_writer = log_writer
+        self.train_counter = 0
 
     def collect_rollouts(
             self,
@@ -333,11 +337,16 @@ class CustomPPO(PPO):
 
                     actions_filtered = rollout_data.actions[~same_states]
 
-                    _loss = self.policy.features_extractor.compute_loss(
+                    _loss, loss_vals = self.policy.features_extractor.compute_loss(
                         obs, next_obs, z0, z1, z0_filtered, z1_filtered,
                         fake_z1_filtered, rollout_data.actions, actions_filtered, rollout_data.rewards,
                         rollout_data.dones,
                     )
+
+                    names = ['feature_loss', 'rec_loss', 'inv_loss', 'ratio_loss', 'reward_loss', 'terminate_loss',
+                             'neighbour_loss']
+                    for name, val in zip(names, loss_vals):
+                        self.log_writer.add_scalar(name, val, self.train_counter)
 
                     loss += _loss
                 else:
@@ -348,6 +357,8 @@ class CustomPPO(PPO):
                     log_ratio = log_prob - rollout_data.old_log_prob
                     approx_kl_div = torch.mean((torch.exp(log_ratio) - 1) - log_ratio).cpu().numpy()
                     approx_kl_divs.append(approx_kl_div)
+
+                self.train_counter += 1
 
                 if self.target_kl is not None and approx_kl_div > 1.5 * self.target_kl:
                     continue_training = False
@@ -368,6 +379,8 @@ class CustomPPO(PPO):
                 # Clip grad norm
                 torch.nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)
                 self.policy.optimizer.step()
+
+                self.log_writer.add_scalar("loss", loss.detach().cpu().item(), self.train_counter - 1)
 
             self._n_updates += 1
             if not continue_training:
@@ -420,7 +433,7 @@ class BaseEncoderExtractor(BaseFeaturesExtractor):
 
     def set_up(self):
         if self.weights is None:
-            self.weights = {'inv': 1.0, 'dis': 1.0, 'neighbour': 0.0, 'dec': 0.0, 'rwd': 0.1, 'terminate': 1.0}
+            self.weights = {'total': 0.1, 'inv': 1.0, 'dis': 1.0, 'neighbour': 0.0, 'dec': 0.0, 'rwd': 0.1, 'terminate': 1.0}
         assert self.action_space is not None, "Must specify action space."
         n_actions = self.action_space.n
         n_latent_dims = self.net_arch[-1]
@@ -495,7 +508,7 @@ class BaseEncoderExtractor(BaseFeaturesExtractor):
             actions_filtered: torch.Tensor,
             rewards: torch.Tensor,
             dones: torch.Tensor,
-    ) -> torch.Tensor:
+    ) -> Tuple[torch.Tensor, Tuple]:
         if not self.has_set_up:
             self.set_up()
         device = next(self.parameters()).device
@@ -580,8 +593,17 @@ class BaseEncoderExtractor(BaseFeaturesExtractor):
         loss += reward_loss * self.weights['rwd']
         loss += terminate_loss * self.weights['terminate']
         loss += neighbour_loss * self.weights['neighbour']
+        loss *= self.weights['total']
 
-        return loss
+        return loss, (
+            loss.detach().cpu().item(),
+            rec_loss.detach().cpu().item(),
+            inv_loss.detach().cpu().item(),
+            ratio_loss.detach().cpu().item(),
+            reward_loss.detach().cpu().item(),
+            terminate_loss.detach().cpu().item(),
+            neighbour_loss.detach().cpu().item(),
+        )
 
     def process(self, observations: torch.Tensor) -> torch.Tensor:
         # Placeholder method to be implemented by subclasses

@@ -441,38 +441,38 @@ class BaseEncoderExtractor(BaseFeaturesExtractor):
             self.inv_model = InvNet(
                 n_actions=n_actions,
                 n_latent_dims=n_latent_dims,
-                n_units_per_layer=1,
-                n_hidden_layers=512,
+                n_hidden_layers=2,
+                n_units_per_layer=128,
             )
 
         if self.weights['dis'] > 0.0:
             self.discriminator = ContrastiveNet(
                 n_latent_dims=n_latent_dims,
-                n_hidden_layers=1,
-                n_units_per_layer=512,
+                n_hidden_layers=2,
+                n_units_per_layer=128,
             )
 
         if self.weights['dec'] > 0.0:
             self.decoder = Binary2BinaryDecoder(
                 n_latent_dims=n_latent_dims,
                 output_dim=self.obs_dim,
-                n_hidden_layers=1,
-                n_units_per_layer=512,
+                n_hidden_layers=2,
+                n_units_per_layer=128,
             )
 
         if self.weights['rwd'] > 0.0:
             self.reward_predictor = RewardPredictor(
                 n_actions=n_actions,
                 n_latent_dims=n_latent_dims,
-                n_hidden_layers=1,
-                n_units_per_layer=512,
+                n_hidden_layers=2,
+                n_units_per_layer=128,
             )
 
         if self.weights['terminate'] > 0.0:
             self.termination_predictor = TerminationPredictor(
                 n_latent_dims=n_latent_dims,
-                n_hidden_layers=1,
-                n_units_per_layer=512,
+                n_hidden_layers=2,
+                n_units_per_layer=128,
             )
 
         self.cross_entropy = torch.nn.CrossEntropyLoss()

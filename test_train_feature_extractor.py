@@ -3,7 +3,7 @@ import os
 import gymnasium as gym
 import torch
 from stable_baselines3.common.vec_env import SubprocVecEnv, VecMonitor
-from torch import nn
+from torch import nn, optim
 from torch.utils.data import Dataset, DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
@@ -30,7 +30,7 @@ class GymDataset(Dataset):
     def resample(self):
         """Resample the data by interacting with the environment and collecting a new epoch of data."""
         self.data.clear()  # Clear existing data
-        obs, _ = self.env.reset()  # Reset the environment to get the initial observations
+        obs = self.env.reset()  # Reset the environment to get the initial observations
 
         # Collect data for one full epoch with a progress bar
         for _ in tqdm(range(self.epoch_size // self.num_envs), desc="Sampling Data", unit="step"):
@@ -71,7 +71,7 @@ def make_env():
             txt_file_path=None,
             rand_gen_shape=(4, 4),
             display_size=4,
-            display_mode='rand',
+            display_mode='random',
             random_rotate=True,
             random_flip=True,
             custom_mission="Explore and interact with objects.",
@@ -102,12 +102,55 @@ if __name__ == '__main__':
     model = CustomPPO(CustomActorCriticPolicy, env=make_env(), policy_kwargs=policy_kwargs, verbose=1, log_dir=log_dir,
                       batch_size=4)
     feature_model = model.policy.features_extractor
+    feature_model = feature_model.cuda()
 
     # Create the dataset using the provided `make_env` function
-    dataset = GymDataset(make_env, 1e6, num_envs=8)
+    dataset = GymDataset(make_env, int(5e3), num_envs=8)
     dataloader = DataLoader(dataset, batch_size=32, shuffle=True)
 
+    optimizer = optim.Adam(feature_model.parameters(), lr=1e-4)
+
+    counter = 0
+
     # Training loop with the initial data, with progress bar
-    for obs, action, next_obs, reward, done in tqdm(dataloader, desc="Training", unit="batch"):
+    for obs, actions, next_obs, rewards, dones in tqdm(dataloader, desc="Training", unit="batch"):
         # Perform training here
-        pass
+        differences = obs - next_obs
+        norms = torch.norm(differences, p=2, dim=1)
+        same_states = norms < 0.5
+
+        obs = obs.cuda()
+        actions = actions.cuda()
+        next_obs = next_obs.cuda()
+        rewards = rewards.cuda()
+        dones = dones.cuda()
+
+        z0 = feature_model(obs)
+        z1 = feature_model(next_obs)
+
+        # filter out the cases that the agent did not move
+        z0_filtered = z0[~same_states]
+        z1_filtered = z1[~same_states]
+
+        # get fake z1
+        idx = torch.randperm(len(obs))
+        fake_z1 = z1.view(len(z1), -1)[idx].view(z1.size())
+        fake_z1_filtered = fake_z1[~same_states]
+
+        actions_filtered = actions[~same_states]
+
+        loss, loss_vals = feature_model.compute_loss(
+            obs, next_obs, z0, z1, z0_filtered, z1_filtered,
+            fake_z1_filtered, actions, actions_filtered, rewards,
+            dones,
+        )
+
+        names = ['feature_loss', 'rec_loss', 'inv_loss', 'ratio_loss', 'reward_loss', 'terminate_loss',
+                 'neighbour_loss']
+        for name, val in zip(names, loss_vals):
+            log_writer.add_scalar(name, val, counter)
+
+        counter += 1
+
+        loss.backward()
+        optimizer.step()

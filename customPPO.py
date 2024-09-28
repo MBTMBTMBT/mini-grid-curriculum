@@ -446,9 +446,11 @@ class BaseEncoderExtractor(BaseFeaturesExtractor):
 
         self.obs_dim = self.features_dim
 
-    def set_up(self):
+
         if self.weights is None:
             self.weights = {'total': 1.0, 'inv': 1.0, 'dis': 1.0, 'neighbour': 0.1, 'dec': 0.0, 'rwd': 0.1, 'terminate': 1.0}
+
+    def set_up(self):
         assert self.action_space is not None, "Must specify action space."
         n_actions = self.action_space.n
         n_latent_dims = self.net_arch[-1]

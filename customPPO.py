@@ -317,6 +317,10 @@ class CustomPPO(PPO):
 
                     loss = policy_loss + self.ent_coef * entropy_loss + self.vf_coef * value_loss
 
+                    # #######################################
+                    # loss = torch.tensor(0.0).to(loss.device)
+                    # #######################################
+
                     # if do train the encoder with constrains:
                     if not self.policy.features_extractor.encoder_only:
                         # Extract next observations from rollout data
@@ -580,6 +584,8 @@ class BaseEncoderExtractor(BaseFeaturesExtractor):
             # compute reward loss
             pred_rwds = self.reward_predictor(z0, actions.type(torch.int64).squeeze(), z1).squeeze()
             reward_loss = self.mse_loss(pred_rwds, rewards)
+            # a = rewards
+            # b = pred_rwds
 
         terminate_loss = torch.tensor(0.0).to(device)
         if self.termination_predictor:
@@ -587,8 +593,11 @@ class BaseEncoderExtractor(BaseFeaturesExtractor):
             # compute terminate loss
             pred_terminated = self.termination_predictor(z1).squeeze()
             terminate_loss = self.bce_loss(pred_terminated, dones.type(torch.float32))
+            # c = pred_terminated
+            # d = dones
 
         # compute neighbour loss
+        # neighbour_loss = torch.tensor(0.0).to(device)
         distances = torch.abs(z0 - z1) * 0.1
         weights = torch.linspace(1.0, 0.0, steps=z0.size(1)).to(z0.device)
         weights = weights.unsqueeze(0)

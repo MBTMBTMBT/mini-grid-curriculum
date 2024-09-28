@@ -107,8 +107,8 @@ if __name__ == '__main__':
     feature_model.weights = {'total': 1.0, 'inv': 1.0, 'dis': 0.0, 'neighbour': 0.1, 'dec': 0.0, 'rwd': 0.1, 'terminate': 1.0}
 
     # Create the dataset using the provided `make_env` function
-    dataset = GymDataset(make_env, int(50e5), num_envs=12)
-    dataloader = DataLoader(dataset, batch_size=4, shuffle=True)
+    dataset = GymDataset(make_env, int(1e5), num_envs=12)
+    dataloader = DataLoader(dataset, batch_size=8, shuffle=True)
 
     optimizer = optim.Adam(feature_model.parameters(), lr=1e-4)
 
@@ -141,18 +141,22 @@ if __name__ == '__main__':
 
         actions_filtered = actions[~same_states]
 
-        loss, loss_vals = feature_model.compute_loss(
-            obs, next_obs, z0, z1, z0_filtered, z1_filtered,
-            fake_z1_filtered, actions, actions_filtered, rewards,
-            dones,
-        )
+        try:
+            loss, loss_vals = feature_model.compute_loss(
+                obs, next_obs, z0, z1, z0_filtered, z1_filtered,
+                fake_z1_filtered, actions, actions_filtered, rewards,
+                dones,
+            )
 
-        names = ['feature_loss', 'rec_loss', 'inv_loss', 'ratio_loss', 'reward_loss', 'terminate_loss',
-                 'neighbour_loss']
-        for name, val in zip(names, loss_vals):
-            log_writer.add_scalar(name, val, counter)
+            names = ['feature_loss', 'rec_loss', 'inv_loss', 'ratio_loss', 'reward_loss', 'terminate_loss',
+                     'neighbour_loss']
+            for name, val in zip(names, loss_vals):
+                log_writer.add_scalar(name, val, counter)
 
-        counter += 1
+            counter += 1
 
-        loss.backward()
-        optimizer.step()
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+        except Exception as e:
+            print(e)

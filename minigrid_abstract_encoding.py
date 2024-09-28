@@ -229,32 +229,11 @@ if __name__ == '__main__':
         FullyObsSB3MLPWrapper(
             CustomEnv(
                 txt_file_path=r"./maps/short_corridor.txt",
-                display_size=11,
-                display_mode="random",
-                random_rotate=True,
-                random_flip=True,
-                custom_mission="reach the goal",
-                max_steps=500,
-            )
-        ),
-        FullyObsSB3MLPWrapper(
-            CustomEnv(
-                txt_file_path=r"./maps/long_corridor.txt",
-                display_size=11,
-                display_mode="random",
-                random_rotate=True,
-                random_flip=True,
-                custom_mission="reach the goal",
-                max_steps=500,
-            )
-        ),
-        FullyObsSB3MLPWrapper(
-            CustomEnv(
-                txt_file_path=r"./maps/extra_long_corridor.txt",
-                display_size=11,
-                display_mode="random",
-                random_rotate=True,
-                random_flip=True,
+                rand_gen_shape=None,
+                display_size=6,
+                display_mode="middle",
+                random_rotate=False,
+                random_flip=False,
                 custom_mission="reach the goal",
                 max_steps=500,
             )
@@ -265,29 +244,8 @@ if __name__ == '__main__':
         FullyObsSB3MLPWrapper(
             CustomEnv(
                 txt_file_path=r"./maps/short_corridor.txt",
-                display_size=11,
-                display_mode="middle",
-                random_rotate=False,
-                random_flip=False,
-                custom_mission="reach the goal",
-                max_steps=500,
-            )
-        ),
-        FullyObsSB3MLPWrapper(
-            CustomEnv(
-                txt_file_path=r"./maps/long_corridor.txt",
-                display_size=11,
-                display_mode="middle",
-                random_rotate=False,
-                random_flip=False,
-                custom_mission="reach the goal",
-                max_steps=500,
-            )
-        ),
-        FullyObsSB3MLPWrapper(
-            CustomEnv(
-                txt_file_path=r"./maps/extra_long_corridor.txt",
-                display_size=11,
+                rand_gen_shape=None,
+                display_size=6,
                 display_mode="middle",
                 random_rotate=False,
                 random_flip=False,
@@ -303,7 +261,7 @@ if __name__ == '__main__':
     LATENT_DIMS = 16
 
     # train hyperparams
-    WEIGHTS = {'inv': 1.0, 'dis': 1.0, 'neighbour': 0.0, 'dec': 0.0, 'rwd': 0.1, 'terminate': 1.0}
+    WEIGHTS = {'inv': 0.0, 'dis': 0.0, 'neighbour': 0.0, 'dec': 0.0, 'rwd': 0.0, 'terminate': 1.0}
     BATCH_SIZE = 8
     LR = 1e-4
     ALL_BITS = True

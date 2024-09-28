@@ -81,7 +81,7 @@ def make_env():
 
 
 if __name__ == '__main__':
-    session_dir = "feature_extractor_test"
+    session_dir = "experiments/feature_extractor_test"
     policy_kwargs = dict(
         features_extractor_class=TransformerEncoderExtractor,  # Use the custom encoder extractor
         features_extractor_kwargs=dict(
@@ -104,9 +104,11 @@ if __name__ == '__main__':
     feature_model = model.policy.features_extractor
     feature_model = feature_model.cuda()
 
+    feature_model.weights = {'total': 1.0, 'inv': 1.0, 'dis': 0.0, 'neighbour': 0.1, 'dec': 0.0, 'rwd': 0.1, 'terminate': 1.0}
+
     # Create the dataset using the provided `make_env` function
-    dataset = GymDataset(make_env, int(5e3), num_envs=8)
-    dataloader = DataLoader(dataset, batch_size=32, shuffle=True)
+    dataset = GymDataset(make_env, int(50e5), num_envs=12)
+    dataloader = DataLoader(dataset, batch_size=4, shuffle=True)
 
     optimizer = optim.Adam(feature_model.parameters(), lr=1e-4)
 

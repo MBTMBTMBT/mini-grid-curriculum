@@ -441,14 +441,15 @@ class BaseEncoderExtractor(BaseFeaturesExtractor):
         self.weights = weights
         self.action_space = action_space
 
-        self.has_set_up = False
-
         self.net_arch = net_arch
 
         self.obs_dim = self.features_dim
 
         if self.weights is None:
             self.weights = {'total': 1.0, 'inv': 1.0, 'dis': 1.0, 'neighbour': 0.1, 'dec': 0.0, 'rwd': 0.1, 'terminate': 1.0}
+
+        if not encoder_only:
+            self.set_up()
 
     @property
     def observation_space(self) -> Space:
@@ -495,14 +496,14 @@ class BaseEncoderExtractor(BaseFeaturesExtractor):
             self.inv_model = InvNet(
                 n_actions=n_actions,
                 n_latent_dims=n_latent_dims,
-                n_hidden_layers=1,
+                n_hidden_layers=3,
                 n_units_per_layer=128,
             )
 
         if self.weights['dis'] > 0.0:
             self.discriminator = ContrastiveNet(
                 n_latent_dims=n_latent_dims,
-                n_hidden_layers=1,
+                n_hidden_layers=3,
                 n_units_per_layer=128,
             )
 
@@ -510,7 +511,7 @@ class BaseEncoderExtractor(BaseFeaturesExtractor):
             self.decoder = Binary2BinaryDecoder(
                 n_latent_dims=n_latent_dims,
                 output_dim=self.obs_dim,
-                n_hidden_layers=1,
+                n_hidden_layers=3,
                 n_units_per_layer=128,
             )
 
@@ -518,14 +519,14 @@ class BaseEncoderExtractor(BaseFeaturesExtractor):
             self.reward_predictor = RewardPredictor(
                 n_actions=n_actions,
                 n_latent_dims=n_latent_dims,
-                n_hidden_layers=1,
+                n_hidden_layers=3,
                 n_units_per_layer=128,
             )
 
         if self.weights['terminate'] > 0.0:
             self.termination_predictor = TerminationPredictor(
                 n_latent_dims=n_latent_dims,
-                n_hidden_layers=1,
+                n_hidden_layers=3,
                 n_units_per_layer=128,
             )
 
@@ -548,30 +549,28 @@ class BaseEncoderExtractor(BaseFeaturesExtractor):
             rewards: torch.Tensor,
             dones: torch.Tensor,
     ) -> Tuple[torch.Tensor, Tuple]:
-        if not self.has_set_up:
-            self.set_up()
         device = next(self.parameters()).device
         if self.encoder_only:
-            return torch.tensor(0.0).to(device)
+            return torch.tensor(0.0, requires_grad=True).to(device)
 
-        obs = obs.to(device)
-        next_obs = next_obs.to(device)
-        z0 = z0.to(device)
-        z1 = z1.to(device)
-        z0_filtered = z0_filtered.to(device)
-        z1_filtered = z1_filtered.to(device)
-        fake_z1_filtered = fake_z1_filtered.to(device)
-        actions = actions.to(device)
-        actions_filtered = actions_filtered.to(device)
-        rewards = rewards.to(device)
-        dones = dones.to(device)
+        # obs = obs.to(device)
+        # next_obs = next_obs.to(device)
+        # z0 = z0.to(device)
+        # z1 = z1.to(device)
+        # z0_filtered = z0_filtered.to(device)
+        # z1_filtered = z1_filtered.to(device)
+        # fake_z1_filtered = fake_z1_filtered.to(device)
+        # actions = actions.to(device)
+        # actions_filtered = actions_filtered.to(device)
+        # rewards = rewards.to(device)
+        # dones = dones.to(device)
 
         self.cross_entropy = self.cross_entropy.to(device)
         self.bce_loss = self.bce_loss.to(device)
         self.bce_loss_ = self.bce_loss_.to(device)
         self.mse_loss = self.mse_loss.to(device)
 
-        rec_loss = torch.tensor(0.0).to(device)
+        rec_loss = torch.tensor(0.0, requires_grad=True).to(device)
         if self.decoder:
             self.decoder = self.decoder.to(device)
             # compute reconstruct loss
@@ -582,14 +581,14 @@ class BaseEncoderExtractor(BaseFeaturesExtractor):
                 torch.cat((obs, next_obs), dim=0),
             )
 
-        inv_loss = torch.tensor(0.0).to(device)
+        inv_loss = torch.tensor(0.0, requires_grad=True).to(device)
         if self.inv_model:
             self.inv_model = self.inv_model.to(device)
             if z0_filtered.size(0) > 0:
                 pred_actions = self.inv_model(z0_filtered, z1_filtered)
-                inv_loss = self.cross_entropy(pred_actions, actions_filtered.squeeze().type(torch.int64))
+                inv_loss = self.cross_entropy(pred_actions, actions_filtered.squeeze(dim=-1).type(torch.int64))
 
-        ratio_loss = torch.tensor(0.0).to(device)
+        ratio_loss = torch.tensor(0.0, requires_grad=True).to(device)
         if self.discriminator:
             self.discriminator = self.discriminator.to(device)
             labels = torch.cat((
@@ -602,23 +601,28 @@ class BaseEncoderExtractor(BaseFeaturesExtractor):
             ), dim=0).squeeze()
             ratio_loss = self.bce_loss(pred_fakes, labels)
 
-        reward_loss = torch.tensor(0.0).to(device)
+        reward_loss = torch.tensor(0.0, requires_grad=True).to(device)
         if self.reward_predictor:
             self.reward_predictor = self.reward_predictor.to(device)
             # compute reward loss
             pred_rwds = self.reward_predictor(z0, actions.type(torch.int64).squeeze(), z1).squeeze()
             reward_loss = self.mse_loss(pred_rwds, rewards)
-            # a = rewards
-            # b = pred_rwds
+            a = rewards
+            b = pred_rwds
 
-        terminate_loss = torch.tensor(0.0).to(device)
+        terminate_loss = torch.tensor(0.0, requires_grad=True).to(device)
         if self.termination_predictor:
             self.termination_predictor = self.termination_predictor.to(device)
             # compute terminate loss
             pred_terminated = self.termination_predictor(z1).squeeze()
-            terminate_loss = self.bce_loss(pred_terminated, dones.type(torch.float32))
+            dones_val = dones.type(torch.float32).squeeze()
+            terminate_loss = F.binary_cross_entropy(pred_terminated, dones_val)
+            # print(pred_terminated)
+            # print(dones_val)
+            # print(terminate_loss)
             # c = pred_terminated
             # d = dones
+            pass
 
         # compute neighbour loss
         # neighbour_loss = torch.tensor(0.0).to(device)
@@ -630,7 +634,7 @@ class BaseEncoderExtractor(BaseFeaturesExtractor):
         neighbour_loss = torch.mean(torch.pow(weighted_distance, 2))
 
         # compute total loss
-        loss = torch.tensor(0.0).to(device)
+        loss = torch.tensor(0.0, requires_grad=True).to(device)
         loss += rec_loss * self.weights['dec']
         loss += inv_loss * self.weights['inv']
         loss += ratio_loss * self.weights['dis']
@@ -639,20 +643,20 @@ class BaseEncoderExtractor(BaseFeaturesExtractor):
         loss += neighbour_loss * self.weights['neighbour']
         loss *= self.weights['total']
 
-        return loss, (
-            loss.detach().cpu().item(),
-            rec_loss.detach().cpu().item(),
-            inv_loss.detach().cpu().item(),
-            ratio_loss.detach().cpu().item(),
-            reward_loss.detach().cpu().item(),
-            terminate_loss.detach().cpu().item(),
-            neighbour_loss.detach().cpu().item(),
+        return terminate_loss, (
+            loss.clone().detach().cpu().item(),
+            rec_loss.clone().detach().cpu().item(),
+            inv_loss.clone().detach().cpu().item(),
+            ratio_loss.clone().detach().cpu().item(),
+            reward_loss.clone().detach().cpu().item(),
+            terminate_loss.clone().detach().cpu().item(),
+            neighbour_loss.clone().detach().cpu().item(),
         )
 
 
 class MLPEncoderExtractor(BaseEncoderExtractor):
     def __init__(self, observation_space: gym.spaces.Box, net_arch=None, activation_fn=nn.ReLU, encoder_only=True,
-                 action_space: gym.spaces.Discrete = None, weights=None,):
+                 action_space: gym.spaces.Discrete = None, weights=None):
         # Build the encoder network layers
         if net_arch is None:
             net_arch = [64, 64]
@@ -776,15 +780,20 @@ class CNNEncoderExtractor(BaseEncoderExtractor):
         with torch.no_grad():
             dummy_input = torch.zeros(1, *observation_space.shape)
             conv_output = self.cnn(dummy_input)
-            self.cnn_output_dim = conv_output.shape[1]
+            pooled_output = F.adaptive_avg_pool2d(conv_output,
+                                                  (1, 1))  # Apply average pooling to get a fixed-size output
+            conv_output_flattened_dim = pooled_output.numel()  # Use numel() to get the total number of elements
 
         # Fully connected layers defined by net_arch
-        input_dim = self.cnn_output_dim
+        input_dim = conv_output_flattened_dim
         fc_layers = []
-        for layer_size in net_arch:
+        for layer_size in net_arch[:-1]:
             fc_layers.append(nn.Linear(input_dim, layer_size))
             fc_layers.append(activation_fn())
             input_dim = layer_size
+
+        # Add the last layer without activation
+        fc_layers.append(nn.Linear(input_dim, net_arch[-1]))
 
         # Create the fully connected model
         self.fc = nn.Sequential(*fc_layers)

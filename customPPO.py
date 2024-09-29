@@ -4,6 +4,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import gymnasium as gym
+from gymnasium import Space
 from gymnasium.vector.utils import spaces
 from matplotlib import pyplot as plt
 from stable_baselines3 import PPO
@@ -449,9 +450,11 @@ class BaseEncoderExtractor(BaseFeaturesExtractor):
         if self.weights is None:
             self.weights = {'total': 1.0, 'inv': 1.0, 'dis': 1.0, 'neighbour': 0.1, 'dec': 0.0, 'rwd': 0.1, 'terminate': 1.0}
 
+    @property
+    def observation_space(self) -> Space:
+        return self._observation_space
+
     def forward(self, observations: torch.Tensor) -> torch.Tensor:
-        # First flatten the input (same as FlattenExtractor)
-        observations = observations.view(observations.size(0), -1)
         encoded = self.process(observations)
 
         # Sigmoid activation
@@ -673,6 +676,8 @@ class MLPEncoderExtractor(BaseEncoderExtractor):
         self._features_dim = net_arch[-1]
 
     def process(self, observations: torch.Tensor) -> torch.Tensor:
+        # First flatten the input (same as FlattenExtractor)
+        observations = observations.view(observations.size(0), -1)
         # Use the MLP network from the parent class
         return self.mlp(observations)
 
@@ -720,6 +725,8 @@ class TransformerEncoderExtractor(BaseEncoderExtractor):
         self._features_dim = net_arch[-1]
 
     def process(self, observations: torch.Tensor) -> torch.Tensor:
+        # First flatten the input (same as FlattenExtractor)
+        observations = observations.view(observations.size(0), -1)
         # Apply padding if necessary
         if self.pad_size > 0:
             padding = torch.zeros((observations.size(0), self.pad_size), device=observations.device)

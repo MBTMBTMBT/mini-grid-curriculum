@@ -446,9 +446,43 @@ class BaseEncoderExtractor(BaseFeaturesExtractor):
 
         self.obs_dim = self.features_dim
 
-
         if self.weights is None:
             self.weights = {'total': 1.0, 'inv': 1.0, 'dis': 1.0, 'neighbour': 0.1, 'dec': 0.0, 'rwd': 0.1, 'terminate': 1.0}
+
+    def forward(self, observations: torch.Tensor) -> torch.Tensor:
+        # First flatten the input (same as FlattenExtractor)
+        observations = observations.view(observations.size(0), -1)
+        encoded = self.process(observations)
+
+        # Sigmoid activation
+        encoded = torch.sigmoid(self.slope * encoded)
+
+        # Conditional output formatting based on binary_output flag
+        if self.binary_output:
+            encoded_binary = (encoded > 0.5).float().detach() + encoded - encoded.detach()
+            return encoded_binary
+        else:
+            return encoded
+
+    def process(self, observations: torch.Tensor) -> torch.Tensor:
+        # Placeholder method to be implemented by subclasses
+        raise NotImplementedError
+
+    def freeze(self):
+        """
+        Freeze the parameters, preventing them from being updated during training.
+        """
+        self.frozen = True
+        for param in self.parameters():
+            param.requires_grad = False
+
+    def unfreeze(self):
+        """
+        Unfreeze the parameters, allowing them to be updated during training.
+        """
+        self.frozen = False
+        for param in self.parameters():
+            param.requires_grad = True
 
     def set_up(self):
         assert self.action_space is not None, "Must specify action space."
@@ -496,21 +530,6 @@ class BaseEncoderExtractor(BaseFeaturesExtractor):
         self.bce_loss = torch.nn.BCELoss()
         self.bce_loss_ = torch.nn.BCELoss(reduction="none")
         self.mse_loss = torch.nn.MSELoss()
-
-    def forward(self, observations: torch.Tensor) -> torch.Tensor:
-        # First flatten the input (same as FlattenExtractor)
-        observations = observations.view(observations.size(0), -1)
-        encoded = self.process(observations)
-
-        # Sigmoid activation
-        encoded = torch.sigmoid(self.slope * encoded)
-
-        # Conditional output formatting based on binary_output flag
-        if self.binary_output:
-            encoded_binary = (encoded > 0.5).float().detach() + encoded - encoded.detach()
-            return encoded_binary
-        else:
-            return encoded
 
     def compute_loss(
             self,
@@ -627,26 +646,6 @@ class BaseEncoderExtractor(BaseFeaturesExtractor):
             neighbour_loss.detach().cpu().item(),
         )
 
-    def process(self, observations: torch.Tensor) -> torch.Tensor:
-        # Placeholder method to be implemented by subclasses
-        raise NotImplementedError
-
-    def freeze(self):
-        """
-        Freeze the parameters, preventing them from being updated during training.
-        """
-        self.frozen = True
-        for param in self.parameters():
-            param.requires_grad = False
-
-    def unfreeze(self):
-        """
-        Unfreeze the parameters, allowing them to be updated during training.
-        """
-        self.frozen = False
-        for param in self.parameters():
-            param.requires_grad = True
-
 
 class MLPEncoderExtractor(BaseEncoderExtractor):
     def __init__(self, observation_space: gym.spaces.Box, net_arch=None, activation_fn=nn.ReLU, encoder_only=True,
@@ -736,6 +735,72 @@ class TransformerEncoderExtractor(BaseEncoderExtractor):
         encoded = encoded.squeeze(1)  # Remove the extra sequence dimension
 
         return self.mlp(encoded)
+
+
+class CNNEncoderExtractor(BaseEncoderExtractor):
+    def __init__(self, observation_space: gym.spaces.Box, net_arch=None, cnn_net_arch=None, activation_fn=nn.ReLU,
+                 encoder_only=True, action_space: gym.spaces.Discrete = None, weights=None):
+        if net_arch is None:
+            net_arch = [64, 64]
+
+        if cnn_net_arch is None:
+            # Default CNN architecture: [(out_channels, kernel_size, stride, padding)]
+            cnn_net_arch = [
+                (32, 3, 2, 1),  # out_channels=32, kernel_size=3, stride=2, padding=1
+                (64, 3, 2, 1),  # out_channels=64, kernel_size=3, stride=2, padding=1
+                (128, 3, 2, 1),  # out_channels=128, kernel_size=3, stride=2, padding=1
+            ]
+
+        super().__init__(observation_space, net_arch=net_arch, encoder_only=encoder_only, action_space=action_space,
+                         weights=weights)
+
+        # Create convolutional layers based on cnn_net_arch
+        cnn_layers = []
+        in_channels = observation_space.shape[0]  # The input channel corresponds to observation space's first dimension
+        for out_channels, kernel_size, stride, padding in cnn_net_arch:
+            cnn_layers.append(nn.Conv2d(in_channels=in_channels, out_channels=out_channels,
+                                        kernel_size=kernel_size, stride=stride, padding=padding))
+            cnn_layers.append(activation_fn())
+            in_channels = out_channels
+
+        self.cnn = nn.Sequential(*cnn_layers)
+
+        # Calculate the output shape after convolutions for the observation space size
+        with torch.no_grad():
+            dummy_input = torch.zeros(1, *observation_space.shape)
+            conv_output = self.cnn(dummy_input)
+            self.cnn_output_dim = conv_output.shape[1]
+
+        # Fully connected layers defined by net_arch
+        input_dim = self.cnn_output_dim
+        fc_layers = []
+        for layer_size in net_arch:
+            fc_layers.append(nn.Linear(input_dim, layer_size))
+            fc_layers.append(activation_fn())
+            input_dim = layer_size
+
+        # Create the fully connected model
+        self.fc = nn.Sequential(*fc_layers)
+
+        # Set the features_dim and _features_dim to the last layer size to maintain the binding relationship
+        self._features_dim = net_arch[-1]
+
+    def process(self, observations: torch.Tensor) -> torch.Tensor:
+        # Reshape observations to match the expected input for CNN: (batch_size, channels, height, width)
+        batch_size = observations.size(0)
+        observations = observations.view(batch_size, *self.observation_space.shape)
+
+        # Apply the CNN layers
+        conv_features = self.cnn(observations)
+
+        # Apply average pooling to make the feature map adaptable to any input size
+        pooled_features = F.adaptive_avg_pool2d(conv_features, (1, 1))
+
+        # Flatten the pooled features
+        flattened_features = pooled_features.view(batch_size, -1)
+
+        # Pass through the fully connected layers
+        return self.fc(flattened_features)
 
 
 class CustomActorCriticPolicy(ActorCriticPolicy):

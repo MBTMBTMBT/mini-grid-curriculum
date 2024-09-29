@@ -175,10 +175,10 @@ class Trainer:
 
             if load_path and os.path.exists(load_path):
                 print(f"Loading the model from {load_path}...")
-                model = CustomPPO.load(load_path, env=env)
+                model = PPO.load(load_path, env=env)
                 model.log_dir = log_dir
             else:
-                model = CustomPPO(CustomActorCriticPolicy, env=env, policy_kwargs=self.policy_kwargs, verbose=1, log_dir=log_dir)
+                model = PPO(CustomActorCriticPolicy, env=env, policy_kwargs=self.policy_kwargs, verbose=1, batch_size=4)
                 print("Initialized new model.")
                 load_path = os.path.join(model_save_dir, f"saved_model_latest.zip")
 
@@ -230,7 +230,7 @@ if __name__ == '__main__':
 
     ##################################################################
     config = TaskConfig()
-    config.name = "rand"
+    config.name = "6"
     config.rand_gen_shape = (6, 6)
     config.txt_file_path = None
     config.custom_mission = "reach the goal"
@@ -245,58 +245,58 @@ if __name__ == '__main__':
         train_configs.append(config)
 
     config = TaskConfig()
-    config.name = "0"
+    config.name = "6-1"
     config.rand_gen_shape = None
-    config.txt_file_path = r"./maps/0.txt"
+    config.txt_file_path = r"./maps/6-1.txt"
     config.custom_mission = "reach the goal"
     config.minimum_display_size = 6
     config.display_mode = "middle"
-    config.random_rotate = False
-    config.random_flip = False
+    config.random_rotate = True
+    config.random_flip = True
     config.max_steps = 50
-    config.start_pos = (4, 4)
+    config.start_pos = (6, 6)
     config.start_dir = 1
     eval_configs.append(config)
 
     config = TaskConfig()
-    config.name = "1"
+    config.name = "6-2"
     config.rand_gen_shape = None
-    config.txt_file_path = r"./maps/1.txt"
+    config.txt_file_path = r"./maps/6-2.txt"
     config.custom_mission = "reach the goal"
     config.minimum_display_size = 6
     config.display_mode = "middle"
-    config.random_rotate = False
-    config.random_flip = False
+    config.random_rotate = True
+    config.random_flip = True
     config.max_steps = 50
-    config.start_pos = (4, 4)
+    config.start_pos = (6, 6)
     config.start_dir = 1
     eval_configs.append(config)
 
     config = TaskConfig()
-    config.name = "2"
+    config.name = "6-3"
     config.rand_gen_shape = None
-    config.txt_file_path = r"./maps/2.txt"
+    config.txt_file_path = r"./maps/6-3.txt"
     config.custom_mission = "reach the goal"
     config.minimum_display_size = 6
     config.display_mode = "middle"
-    config.random_rotate = False
-    config.random_flip = False
+    config.random_rotate = True
+    config.random_flip = True
     config.max_steps = 50
-    config.start_pos = (4, 4)
+    config.start_pos = (6, 6)
     config.start_dir = 1
     eval_configs.append(config)
 
     config = TaskConfig()
-    config.name = "3"
+    config.name = "6-4"
     config.rand_gen_shape = None
-    config.txt_file_path = r"./maps/3.txt"
+    config.txt_file_path = r"./maps/6-4.txt"
     config.custom_mission = "reach the goal"
     config.minimum_display_size = 6
     config.display_mode = "middle"
-    config.random_rotate = False
-    config.random_flip = False
+    config.random_rotate = True
+    config.random_flip = True
     config.max_steps = 50
-    config.start_pos = (4, 4)
+    config.start_pos = (6, 6)
     config.start_dir = 1
     eval_configs.append(config)
 
@@ -310,12 +310,13 @@ if __name__ == '__main__':
             policy_kwargs=dict(
                 features_extractor_class=TransformerEncoderExtractor,  # Use the custom encoder extractor
                 features_extractor_kwargs=dict(
-                    net_arch=[32],  # Custom layer sizes
+                    net_arch=[6],  # Custom layer sizes
                     num_transformer_layers=2,
                     n_heads=8,
-                    activation_fn=nn.LeakyReLU  # Activation function
+                    activation_fn=nn.LeakyReLU,  # Activation function
+                    encoder_only=True,
                 ),
-                net_arch=dict(pi=[32, 128, 128], vf=[32, 128, 128]),  # Policy and value network architecture
+                net_arch=dict(pi=[6, 128, 128], vf=[6, 128, 128]),  # Policy and value network architecture
                 activation_fn=nn.LeakyReLU,
             )
         )

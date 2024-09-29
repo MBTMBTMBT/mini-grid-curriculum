@@ -303,7 +303,7 @@ if __name__ == '__main__':
     ##################################################################
 
     # encoder = None  # test non encoding case
-    for i in range(3):
+    for i in range(1):
         runner = Trainer(
             train_configs,
             eval_configs,

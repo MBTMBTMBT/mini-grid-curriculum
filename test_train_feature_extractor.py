@@ -89,10 +89,11 @@ if __name__ == '__main__':
             net_arch=[32],  # Custom layer sizes
             cnn_net_arch=[
                 (32, 3, 2, 1),
-                (64, 3, 2, 1),
-                (128, 3, 2, 1),
+                (32, 3, 2, 1),
             ],
-            activation_fn=nn.LeakyReLU  # Activation function
+            activation_fn=nn.LeakyReLU,  # Activation function
+            encoder_only=False,
+            weights={'total': 1.0, 'inv': 0.0, 'dis': 1.0, 'neighbour': 0.0, 'dec': 0.0, 'rwd': 0.0, 'terminate': 1.0},
         ),
         net_arch=dict(pi=[32, 128, 128], vf=[32, 128, 128]),  # Policy and value network architecture
         activation_fn=nn.LeakyReLU,
@@ -106,13 +107,13 @@ if __name__ == '__main__':
 
     model = CustomPPO(CustomActorCriticPolicy, env=make_env(), policy_kwargs=policy_kwargs, verbose=1, log_dir=log_dir)
     feature_model = model.policy.features_extractor
+    # feature_model.weights = {'total': 1.0, 'inv': 0.0, 'dis': 1.0, 'neighbour': 0.0, 'dec': 0.0, 'rwd': 0.0, 'terminate': 1.0}
+    # feature_model.set_up()
     feature_model = feature_model.cuda()
-
-    feature_model.weights = {'total': 1.0, 'inv': 0.0, 'dis': 0.0, 'neighbour': 0.0, 'dec': 0.0, 'rwd': 0.0, 'terminate': 1.0}
 
     # Create the dataset using the provided `make_env` function
     dataset = GymDataset(make_env, int(1e4), num_envs=1)
-    dataloader = DataLoader(dataset, batch_size=8, shuffle=True)
+    dataloader = DataLoader(dataset, batch_size=4, shuffle=True)
 
     optimizer = optim.Adam(feature_model.parameters(), lr=5e-4)
 
@@ -156,6 +157,15 @@ if __name__ == '__main__':
             #     plt.tight_layout()
             #     plt.show()
 
+            obs = obs.cuda()
+            actions = actions.cuda()
+            next_obs = next_obs.cuda()
+            rewards = rewards.cuda()
+            dones = dones.cuda()
+
+            # if not dones.any():
+            #     continue
+
             # Compute the differences
             differences = obs - next_obs
             # Flatten the differences along all non-batch dimensions
@@ -165,11 +175,8 @@ if __name__ == '__main__':
             # Compare with the threshold to obtain a boolean tensor
             same_states = norms < 0.5
 
-            obs = obs.cuda()
-            actions = actions.cuda()
-            next_obs = next_obs.cuda()
-            rewards = rewards.cuda()
-            dones = dones.cuda()
+            if len(~same_states) < 1:
+                continue
 
             z0 = feature_model(obs)
             z1 = feature_model(next_obs)
@@ -185,24 +192,25 @@ if __name__ == '__main__':
 
             actions_filtered = actions[~same_states]
 
-            try:
-                loss, loss_vals = feature_model.compute_loss(
-                    obs, next_obs, z0, z1, z0_filtered, z1_filtered,
-                    fake_z1_filtered, actions, actions_filtered, rewards,
-                    dones,
-                )
+            # try:
+            loss, loss_vals = feature_model.compute_loss(
+                obs, next_obs, z0, z1, z0_filtered, z1_filtered,
+                fake_z1_filtered, actions, actions_filtered, rewards,
+                dones,
+            )
 
-                names = ['feature_loss', 'rec_loss', 'inv_loss', 'ratio_loss', 'reward_loss', 'terminate_loss',
-                         'neighbour_loss']
-                for name, val in zip(names, loss_vals):
-                    log_writer.add_scalar(name, val, counter)
+            names = ['feature_loss', 'rec_loss', 'inv_loss', 'ratio_loss', 'reward_loss', 'terminate_loss',
+                     'neighbour_loss']
+            for name, val in zip(names, loss_vals):
+                log_writer.add_scalar(name, val, counter)
 
-                counter += 1
+            counter += 1
 
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
-            except Exception as e:
-                print(e)
+            optimizer.zero_grad()
+            loss.backward()
+
+            optimizer.step()
+            # except Exception as e:
+            #     print(e)
 
 

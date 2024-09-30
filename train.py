@@ -310,13 +310,13 @@ if __name__ == '__main__':
             policy_kwargs=dict(
                 features_extractor_class=TransformerEncoderExtractor,  # Use the custom encoder extractor
                 features_extractor_kwargs=dict(
-                    net_arch=[6],  # Custom layer sizes
-                    num_transformer_layers=2,
+                    net_arch=[16],  # Custom layer sizes
+                    num_transformer_layers=1,
                     n_heads=8,
                     activation_fn=nn.LeakyReLU,  # Activation function
                     encoder_only=True,
                 ),
-                net_arch=dict(pi=[6, 128, 128], vf=[6, 128, 128]),  # Policy and value network architecture
+                net_arch=dict(pi=[32, 32], vf=[32, 32]),  # Policy and value network architecture
                 activation_fn=nn.LeakyReLU,
             )
         )

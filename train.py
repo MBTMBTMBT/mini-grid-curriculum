@@ -239,7 +239,7 @@ if __name__ == '__main__':
     config.random_rotate = True
     config.random_flip = True
     config.max_steps = 500
-    config.train_total_steps = 2e7
+    config.train_total_steps = 0.5e7
     config.difficulty_level = 0
     for _ in range(num_parallel):
         train_configs.append(config)
@@ -321,7 +321,7 @@ if __name__ == '__main__':
             )
         )
         runner.train(
-            session_dir=f"./experiments/mazes/run{i}",
+            session_dir=f"./experiments/mazes_16/run{i}",
             eval_freq=int(50e4),
             compute_info_freq=int(50e4),
             num_eval_episodes=10,

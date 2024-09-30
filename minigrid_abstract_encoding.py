@@ -204,7 +204,7 @@ class EncodingMDPLearner(OneHotEncodingMDPLearner):
             for new_state_code in new_state_set:
                 self.state_set.add(new_state_code)
                 self.env.set_env_with_code(string_to_numpy_binary_array(new_state_code))
-                self.unencoded_state_image_dict[new_state_code] = self.env.env.get_frame(self.env.env.highlight, self.env.env.tile_size, self.env.env.agent_pov)
+                self.unencoded_state_image_dict[new_state_code] = self.env.env.get_frame(highlight=False, tile_size=self.env.env.tile_size, agent_pov=self.env.env.agent_pov)
                 self.encoded_state_set.add(hex(int(self.encode_str(new_state_code)[0:self.keep_dims], 2)))
                 if hex(int(self.encode_str(new_state_code)[0:self.keep_dims], 2)) not in self.encoded_state_to_unencoded_state_dict.keys():
                     self.encoded_state_to_unencoded_state_dict[hex(int(self.encode_str(new_state_code)[0:self.keep_dims], 2))] = set()

@@ -235,6 +235,7 @@ class InfoEvalSaveCallback(EvalSaveCallback):
                 sample_as_prior=True,
                 encoder=encoder,
                 keep_dims=keep_dims,
+                true_obs_dict=mdp_learner.true_obs_dict,
             )
             self.policy_graphs_agent_prior[env_name] = policy_graph
 
@@ -268,6 +269,7 @@ class InfoEvalSaveCallback(EvalSaveCallback):
                 sample_as_prior=False,
                 encoder=self.encoder,
                 keep_dims=self.keep_dims,
+                true_obs_dict=self.mdp_learners[env_name].true_obs_dict,
             )
             sample_model_with_onehot_encoding(
                 self.model,
@@ -277,6 +279,7 @@ class InfoEvalSaveCallback(EvalSaveCallback):
                 sample_as_prior=False,
                 encoder=self.encoder,
                 keep_dims=self.keep_dims,
+                true_obs_dict=self.mdp_learners[env_name].true_obs_dict,
             )
 
             self.policy_graphs_uniform_prior[env_name].value_iteration(

@@ -152,6 +152,8 @@ class EncodingMDPLearner(OneHotEncodingMDPLearner):
         self.keep_dims = keep_dims if keep_dims is not None else encoder.num_output_dims
 
     def encode(self, obs: np.ndarray) -> np.ndarray:
+        obs = numpy_binary_array_to_string(obs)
+        obs = self.true_obs_dict[obs]
         obs = torch.tensor(obs, dtype=torch.float32, device=self.device).unsqueeze(0)
         obs = self.encoder(obs)
         obs = obs.squeeze(0).detach().cpu().numpy()
@@ -162,10 +164,14 @@ class EncodingMDPLearner(OneHotEncodingMDPLearner):
 
     def learn(self, verbose=0):
         self.encoder.eval()
-        obs, _ = self.env.reset()
+        obs, info = self.env.reset()
+        true_obs = obs
+        if len(obs.shape) > 1:
+            obs = info['encoded_obs']
         current_state_code = numpy_binary_array_to_string(obs)
         self.state_set.add(current_state_code)
         self.start_state = current_state_code
+        self.true_obs_dict[current_state_code] = true_obs.squeeze()
         self.encoded_start_state = hex(int(self.encode_str(current_state_code)[0:self.keep_dims], 2))
         state_action_count = 0
         while True:
@@ -180,7 +186,10 @@ class EncodingMDPLearner(OneHotEncodingMDPLearner):
                     if current_state_action_code not in self.state_action_set:
                         self.env.set_env_with_code(current_state_obs)
                         next_obs, reward, done, truncated, info = self.env.step(action)
+                        if len(next_obs.shape) > 1:
+                            next_obs = info['encoded_obs']
                         next_state_code = numpy_binary_array_to_string(next_obs)
+                        self.true_obs_dict[next_state_code] = true_obs.squeeze()
 
                         current_state_action_state_code = str(current_state_code) + "-" + str(action) + "-" + str(next_state_code)
                         self.state_action_state_to_reward_dict[current_state_action_state_code] = reward

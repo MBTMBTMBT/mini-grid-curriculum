@@ -314,13 +314,13 @@ if __name__ == '__main__':
             policy_kwargs=dict(
                 features_extractor_class=CNNEncoderExtractor,  # Use the custom encoder extractor
                 features_extractor_kwargs=dict(
-                    net_arch=[16],  # Custom layer sizes
+                    net_arch=[4],  # Custom layer sizes
                     # num_transformer_layers=1,
                     # n_heads=8,
                     cnn_net_arch=[
                         (32, 3, 2, 1),
-                        (32, 3, 2, 1),
-                        (32, 3, 2, 1),
+                        (64, 3, 2, 1),
+                        (128, 3, 2, 1),
                     ],
                     activation_fn=nn.LeakyReLU,  # Activation function
                     encoder_only=True,
@@ -331,7 +331,7 @@ if __name__ == '__main__':
             output_wrapper=FullyObsImageWrapper,
         )
         runner.train(
-            session_dir=f"./experiments/mazes_16/run{i}",
+            session_dir=f"./experiments/mazes_4/run{i}",
             eval_freq=int(50e4),
             compute_info_freq=int(50e4),
             num_eval_episodes=10,

@@ -1,4 +1,5 @@
 import numpy as np
+from sympy.stats.sampling.sample_numpy import numpy
 
 from customize_minigrid.wrappers import FullyObsSB3MLPWrapper
 from mdp_graph.mdp_graph import MDPGraph, PolicyGraph, OptimalPolicyGraph
@@ -28,11 +29,17 @@ class OneHotEncodingMDPLearner:
         self.state_action_state_to_reward_dict = {}
         self.done_state_action_state_set = set()
 
+        self.true_obs_dict = {}
+
     def learn(self, verbose=0):
-        obs, _ = self.env.reset()
+        obs, info = self.env.reset()
+        true_obs = obs
+        if len(obs.shape) > 1:
+            obs = info['encoded_obs']
         current_state_code = numpy_binary_array_to_string(obs)
         self.state_set.add(current_state_code)
         self.start_state = current_state_code
+        self.true_obs_dict[current_state_code] = true_obs.squeeze()
         state_action_count = 0
         while True:
             new_state_set = set()
@@ -46,7 +53,11 @@ class OneHotEncodingMDPLearner:
                     if current_state_action_code not in self.state_action_set:
                         self.env.set_env_with_code(current_state_obs)
                         next_obs, reward, done, truncated, info = self.env.step(action)
+                        true_obs = next_obs
+                        if len(next_obs.shape) > 1:
+                            next_obs = info['encoded_obs']
                         next_state_code = numpy_binary_array_to_string(next_obs)
+                        self.true_obs_dict[next_state_code] = true_obs.squeeze()
 
                         current_state_action_state_code = str(current_state_code) + "-" + str(action) + "-" + str(next_state_code)
                         self.state_action_state_to_reward_dict[current_state_action_state_code] = reward

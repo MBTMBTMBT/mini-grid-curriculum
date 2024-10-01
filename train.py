@@ -8,12 +8,13 @@ from torch.utils.tensorboard import SummaryWriter
 
 from binary_state_representation.binary2binaryautoencoder import Binary2BinaryEncoder, Binary2BinaryFeatureNet
 from callbacks import EvalCallback, EvalSaveCallback, InfoEvalSaveCallback, SigmoidSlopeManagerCallback
-from customPPO import MLPEncoderExtractor, CustomActorCriticPolicy, TransformerEncoderExtractor, CustomPPO
+from customPPO import MLPEncoderExtractor, CustomActorCriticPolicy, TransformerEncoderExtractor, CustomPPO, \
+    CNNEncoderExtractor
 from customize_minigrid.custom_env import CustomEnv
 from stable_baselines3.common.vec_env import DummyVecEnv, VecMonitor, SubprocVecEnv
 from stable_baselines3.common.callbacks import CallbackList
 
-from customize_minigrid.wrappers import FullyObsSB3MLPWrapper
+from customize_minigrid.wrappers import FullyObsSB3MLPWrapper, FullyObsImageWrapper
 from minigrid_abstract_encoding import EncodingWrapper
 
 
@@ -61,6 +62,7 @@ class Trainer:
             train_configs: List[TaskConfig],
             eval_configs: List[TaskConfig],
             policy_kwargs=None,
+            output_wrapper=FullyObsSB3MLPWrapper,
     ):
         self.train_configs = train_configs
         self.eval_configs = eval_configs
@@ -87,6 +89,8 @@ class Trainer:
         else:
             self.policy_kwargs = policy_kwargs
 
+        self.output_wrapper = output_wrapper
+
     def train(
             self,
             session_dir: str,
@@ -110,7 +114,7 @@ class Trainer:
             :param env_type: A string indicating the type of environment: "train", "eval", or "target"
             :return: A new environment instance
             """
-            return FullyObsSB3MLPWrapper(
+            return self.output_wrapper(
                 CustomEnv(
                     txt_file_path=env_config.txt_file_path,
                     rand_gen_shape=env_config.rand_gen_shape,
@@ -308,17 +312,23 @@ if __name__ == '__main__':
             train_configs,
             eval_configs,
             policy_kwargs=dict(
-                features_extractor_class=TransformerEncoderExtractor,  # Use the custom encoder extractor
+                features_extractor_class=CNNEncoderExtractor,  # Use the custom encoder extractor
                 features_extractor_kwargs=dict(
                     net_arch=[16],  # Custom layer sizes
-                    num_transformer_layers=1,
-                    n_heads=8,
+                    # num_transformer_layers=1,
+                    # n_heads=8,
+                    cnn_net_arch=[
+                        (32, 3, 2, 1),
+                        (32, 3, 2, 1),
+                        (32, 3, 2, 1),
+                    ],
                     activation_fn=nn.LeakyReLU,  # Activation function
                     encoder_only=True,
                 ),
                 net_arch=dict(pi=[32, 32], vf=[32, 32]),  # Policy and value network architecture
                 activation_fn=nn.LeakyReLU,
-            )
+            ),
+            output_wrapper=FullyObsImageWrapper,
         )
         runner.train(
             session_dir=f"./experiments/mazes_16/run{i}",

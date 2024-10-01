@@ -1,4 +1,4 @@
-from typing import Set, Hashable, List
+from typing import Set, Hashable, List, Optional
 import torch
 from stable_baselines3.common.base_class import BaseAlgorithm
 
@@ -16,6 +16,7 @@ def sample_model_with_onehot_encoding(
         encoder: Binary2BinaryEncoder or None = None,
         keep_dims: int = -1,
         #  device: torch.device = torch.device('cpu'),
+        true_obs_dict: Optional[dict] = None
 ):
     """
     No need to use env cause states are observations, if ever use image obs in the future env will be needed.
@@ -23,7 +24,10 @@ def sample_model_with_onehot_encoding(
     device = model.device
     with torch.no_grad():
         for state in states:
-            obs_tensor = string_to_numpy_binary_array(state)
+            if true_obs_dict:
+                obs_tensor = true_obs_dict[state]
+            else:
+                obs_tensor = string_to_numpy_binary_array(state)
             obs_tensor = torch.tensor(obs_tensor, dtype=torch.float32, device=device).unsqueeze(0)
             if encoder:
                 encoder.to(device)

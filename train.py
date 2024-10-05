@@ -205,18 +205,19 @@ class Trainer:
                 max_iter=max_iter,
             )
 
-            sigmoid_slope_manager_callback = SigmoidSlopeManagerCallback(
-                feature_model=model.policy.features_extractor,
-                total_train_steps=steps // num_parallel,
-                log_writer=log_writer,
-                start_timestep=start_time_step,
-            )
+            # sigmoid_slope_manager_callback = SigmoidSlopeManagerCallback(
+            #     feature_model=model.policy.features_extractor,
+            #     total_train_steps=steps // num_parallel,
+            #     log_writer=log_writer,
+            #     start_timestep=start_time_step,
+            # )
 
             model.policy.features_extractor.unfreeze()
             model.policy.unfreeze_mlp_extractor()
 
             # callback_list = CallbackList(callbacks=[target_callback, eval_callback])
-            callback_list = CallbackList(callbacks=[info_eval_callback, sigmoid_slope_manager_callback])
+            # callback_list = CallbackList(callbacks=[info_eval_callback, sigmoid_slope_manager_callback])
+            callback_list = CallbackList(callbacks=[info_eval_callback,])
 
             # train
             model.learn(total_timesteps=steps, callback=callback_list, progress_bar=True)

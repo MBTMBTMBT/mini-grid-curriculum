@@ -1,3 +1,4 @@
+from collections import defaultdict
 from typing import Callable, Optional, List, Dict, Union, Type, Generator, Tuple, Any, NamedTuple
 
 import numpy as np
@@ -121,8 +122,8 @@ class CustomPPO(PPO):
     def __init__(self, *args, log_dir: str, **kwargs):
         super(CustomPPO, self).__init__(*args, **kwargs)
 
-        self.policy.features_extractor.encoder_only = False
-        self.policy.features_extractor.action_space = self.action_space
+        # self.policy.features_extractor.encoder_only = False
+        # self.policy.features_extractor.action_space = self.action_space
 
         self.rollout_buffer = CustomRolloutBuffer(
             buffer_size=self.n_steps,
@@ -329,7 +330,8 @@ class CustomPPO(PPO):
                         next_obs = rollout_data.next_observations  # Extract next_obs for future use
 
                         differences = obs - next_obs
-                        norms = torch.norm(differences, p=2, dim=1)
+                        # Compute norms along all non-batch dimensions
+                        norms = torch.norm(differences, p=2, dim=list(range(1, obs.dim())))
                         same_states = norms < 0.5
 
                         z0 = features
@@ -357,9 +359,15 @@ class CustomPPO(PPO):
                         for name, val in zip(names, loss_vals):
                             log_writer.add_scalar(name, val, self.train_counter)
 
-                        loss += _loss
                     else:
                         _loss = torch.tensor(0.0).to(loss.device)
+
+                    constant_loss_val = 0.0
+                    for each_constant_loss in self.policy.features_extractor.constant_losses:
+                        _loss += each_constant_loss()
+                        constant_loss_val += each_constant_loss().clone().detach().cpu().item()
+                    log_writer.add_scalar('constant loss', constant_loss_val, self.train_counter)
+                    loss += _loss
 
                     # Calculate approximate form of reverse KL Divergence for early stopping
                     with torch.no_grad():
@@ -416,7 +424,7 @@ class CustomPPO(PPO):
                 self.logger.record("train/clip_range_vf", clip_range_vf)
 
         except Exception as e:
-            print(e)
+            e.printStackTrace()
 
         log_writer.close()
 
@@ -449,7 +457,10 @@ class BaseEncoderExtractor(BaseFeaturesExtractor):
             self.weights = {'total': 1.0, 'inv': 1.0, 'dis': 1.0, 'neighbour': 0.1, 'dec': 0.0, 'rwd': 0.1, 'terminate': 1.0}
 
         if not encoder_only:
+            self.weights = defaultdict(lambda: 0.0)
             self.set_up()
+
+        self.constant_losses = []
 
     @property
     def observation_space(self) -> Space:
@@ -750,7 +761,7 @@ class TransformerEncoderExtractor(BaseEncoderExtractor):
 
 class CNNEncoderExtractor(BaseEncoderExtractor):
     def __init__(self, observation_space: gym.spaces.Box, net_arch=None, cnn_net_arch=None, activation_fn=nn.ReLU,
-                 encoder_only=True, action_space: gym.spaces.Discrete = None, weights=None):
+                 encoder_only=True, action_space: gym.spaces.Discrete=None, weights=None):
         if net_arch is None:
             net_arch = [64, 64]
 
@@ -817,6 +828,166 @@ class CNNEncoderExtractor(BaseEncoderExtractor):
 
         # Pass through the fully connected layers
         return self.fc(flattened_features)
+
+
+class VectorQuantizer(nn.Module):
+    def __init__(self, num_embeddings, embedding_dim):
+        super(VectorQuantizer, self).__init__()
+        self.num_embeddings = num_embeddings
+        self.embedding_dim = embedding_dim
+        self.embeddings = nn.Embedding(num_embeddings, embedding_dim)
+        self.embeddings.weight.data.uniform_(-1 / num_embeddings, 1 / num_embeddings)
+
+    def forward(self, z):
+        # Reshape z to match embedding size
+        z_flattened = z.view(-1, z.size(-1))
+        distances = (torch.sum(z_flattened ** 2, dim=1, keepdim=True)
+                     - 2 * torch.matmul(z_flattened, self.embeddings.weight.t())
+                     + torch.sum(self.embeddings.weight ** 2, dim=1))
+        min_indices = torch.argmin(distances, dim=1)
+        z_q = self.embeddings(min_indices).view(z.shape)
+        return z_q, min_indices
+
+
+# class MLPVectorQuantizerEncoderExtractor(BaseEncoderExtractor):
+#     def __init__(self, observation_space: gym.spaces.Box, net_arch=None, embedding_dim=64, num_embeddings=512,
+#                  activation_fn=nn.ReLU, encoder_only=True, action_space: gym.spaces.Discrete = None, weights=None):
+#         if net_arch is None:
+#             net_arch = [128, 64]
+#
+#         # UNSOLVED ISSUE WITH LAST LAYER OF NET ARCH
+#
+#         super(MLPVectorQuantizerEncoderExtractor, self).__init__(observation_space, net_arch=net_arch,
+#                                                                  encoder_only=encoder_only, action_space=action_space,
+#                                                                  weights=weights)
+#
+#         input_dim = observation_space.shape[0]
+#         encoder_layers = []
+#         for layer_size in net_arch:
+#             encoder_layers.append(nn.Linear(input_dim, layer_size))
+#             encoder_layers.append(activation_fn())
+#             input_dim = layer_size
+#
+#         self.encoder = nn.Sequential(*encoder_layers)
+#
+#         # Vector Quantizer
+#         self.vector_quantizer = VectorQuantizer(num_embeddings, embedding_dim)
+#
+#         post_quant_layers = []
+#         post_quant_layers.append(nn.Linear(embedding_dim, net_arch[-1]))  # Map to final output layer
+#         self.post_quant_mlp = nn.Sequential(*post_quant_layers)
+#
+#         # Set the features_dim and _features_dim to the final output layer size
+#         self._features_dim = net_arch[-1]
+#         self.commit_loss = torch.tensor(0.0, requires_grad=True).to(self.device)
+#         self.constant_losses.append(self.get_commit_loss)
+#
+#     def forward(self, observations: torch.Tensor) -> torch.Tensor:
+#         observations = observations.view(observations.size(0), -1)
+#         encoded = self.encoder(observations)
+#         z_q, min_indices = self.vector_quantizer(encoded)
+#         self.commit_loss = F.mse_loss(z_q.detach(), encoded) + F.mse_loss(z_q, encoded.detach())
+#         return self.post_quant_mlp(z_q)
+#
+#     def get_commit_loss(self):
+#         return self.commit_loss
+
+
+class CNNVectorQuantizerEncoderExtractor(BaseEncoderExtractor):
+    def __init__(self, observation_space: gym.spaces.Box, net_arch=None, cnn_net_arch=None, embedding_dim=64,
+                 num_embeddings=512, activation_fn=nn.ReLU, encoder_only=True, action_space: gym.spaces.Discrete=None,
+                 weights=None):
+        if net_arch is None:
+            net_arch = [embedding_dim]  # Default fully connected architecture after quantization
+
+        if cnn_net_arch is None:
+            # Default CNN architecture: [(out_channels, kernel_size, stride, padding)]
+            cnn_net_arch = [
+                (32, 3, 2, 1),  # out_channels=32, kernel_size=3, stride=2, padding=1
+                (64, 3, 2, 1),  # out_channels=64, kernel_size=3, stride=2, padding=1
+                (128, 3, 2, 1),  # out_channels=128, kernel_size=3, stride=2, padding=1
+            ]
+
+        # net_arch used only for knowing the input dimension for super so it should be embedding_dim
+        super().__init__(observation_space, net_arch=[embedding_dim], encoder_only=encoder_only, action_space=action_space,
+                         weights=weights)
+
+        # Create CNN layers
+        cnn_layers = []
+        in_channels = observation_space.shape[0]  # The input channel corresponds to observation space's first dimension
+        for out_channels, kernel_size, stride, padding in cnn_net_arch:
+            cnn_layers.append(nn.Conv2d(in_channels=in_channels, out_channels=out_channels,
+                                        kernel_size=kernel_size, stride=stride, padding=padding))
+            cnn_layers.append(activation_fn())
+            in_channels = out_channels
+
+        self.cnn = nn.Sequential(*cnn_layers)
+
+        # Calculate the output shape after convolutions for the observation space size
+        with torch.no_grad():
+            dummy_input = torch.zeros(1, *observation_space.shape)
+            conv_output = self.cnn(dummy_input)
+            pooled_output = F.adaptive_avg_pool2d(conv_output,
+                                                  (1, 1))  # Apply average pooling to get a fixed-size output
+            conv_output_flattened_dim = pooled_output.numel()  # Use numel() to get the total number of elements
+
+        # MLP layers (from net_arch) applied after CNN and before Vector Quantizer
+        mlp_layers = []
+        input_dim = conv_output_flattened_dim
+        for layer_size in net_arch:
+            mlp_layers.append(nn.Linear(input_dim, layer_size))
+            mlp_layers.append(activation_fn())
+            input_dim = layer_size
+
+        self.mlp = nn.Sequential(*mlp_layers)
+
+        # Linear layer to map MLP output to the embedding_dim
+        self.fc_to_embedding_dim = nn.Linear(input_dim, embedding_dim)
+
+        # Vector Quantizer
+        self.vector_quantizer = VectorQuantizer(num_embeddings, embedding_dim)
+
+        # Set the features_dim and _features_dim to the final output layer size
+        self._features_dim = embedding_dim
+
+        # Commit loss for the vector quantization process
+        self.commit_loss = torch.tensor(0.0, requires_grad=True)
+        self.constant_losses.append(self.get_commit_loss)
+
+    def forward(self, observations: torch.Tensor) -> torch.Tensor:
+        # Reshape observations to match the expected input for CNN: (batch_size, channels, height, width)
+        batch_size = observations.size(0)
+        observations = observations.view(batch_size, *self.observation_space.shape)
+
+        # Apply CNN layers
+        conv_features = self.cnn(observations)
+
+        # Apply average pooling
+        pooled_features = F.adaptive_avg_pool2d(conv_features, (1, 1))
+
+        # Flatten the pooled features
+        flattened_features = pooled_features.view(batch_size, -1)
+
+        # Pass through MLP layers (from net_arch)
+        mlp_output = self.mlp(flattened_features)
+
+        # Map MLP output to embedding_dim
+        embedded_features = self.fc_to_embedding_dim(mlp_output)
+
+        # constrained with tanh activation
+        embedded_features = F.tanh(embedded_features)
+
+        # Vector quantization
+        z_q, min_indices = self.vector_quantizer(embedded_features)
+
+        # Calculate commit loss
+        self.commit_loss = F.mse_loss(z_q.detach(), embedded_features) + F.mse_loss(z_q, embedded_features.detach())
+
+        # Return the quantized result
+        return z_q
+
+    def get_commit_loss(self):
+        return self.commit_loss
 
 
 class CustomActorCriticPolicy(ActorCriticPolicy):

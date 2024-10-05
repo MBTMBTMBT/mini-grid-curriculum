@@ -9,7 +9,7 @@ from torch.utils.tensorboard import SummaryWriter
 from binary_state_representation.binary2binaryautoencoder import Binary2BinaryEncoder, Binary2BinaryFeatureNet
 from callbacks import EvalCallback, EvalSaveCallback, InfoEvalSaveCallback, SigmoidSlopeManagerCallback
 from customPPO import MLPEncoderExtractor, CustomActorCriticPolicy, TransformerEncoderExtractor, CustomPPO, \
-    CNNEncoderExtractor
+    CNNEncoderExtractor, CNNVectorQuantizerEncoderExtractor
 from customize_minigrid.custom_env import CustomEnv
 from stable_baselines3.common.vec_env import DummyVecEnv, VecMonitor, SubprocVecEnv
 from stable_baselines3.common.callbacks import CallbackList
@@ -179,10 +179,11 @@ class Trainer:
 
             if load_path and os.path.exists(load_path):
                 print(f"Loading the model from {load_path}...")
-                model = PPO.load(load_path, env=env)
+                model = CustomPPO.load(load_path, env=env)
                 model.log_dir = log_dir
             else:
-                model = PPO(CustomActorCriticPolicy, env=env, policy_kwargs=self.policy_kwargs, verbose=1,)
+                model = CustomPPO(CustomActorCriticPolicy, env=env, policy_kwargs=self.policy_kwargs, verbose=1,
+                                  log_dir=log_dir)
                 print("Initialized new model.")
                 load_path = os.path.join(model_save_dir, f"saved_model_latest.zip")
 
@@ -312,16 +313,16 @@ if __name__ == '__main__':
             train_configs,
             eval_configs,
             policy_kwargs=dict(
-                features_extractor_class=CNNEncoderExtractor,  # Use the custom encoder extractor
+                features_extractor_class=CNNVectorQuantizerEncoderExtractor,  # Use the custom encoder extractor
                 features_extractor_kwargs=dict(
-                    net_arch=[4],  # Custom layer sizes
-                    # num_transformer_layers=1,
-                    # n_heads=8,
+                    net_arch=None,  # Custom layer sizes
                     cnn_net_arch=[
                         (32, 3, 2, 1),
                         (64, 3, 2, 1),
                         (128, 3, 2, 1),
                     ],
+                    embedding_dim=4,
+                    num_embeddings=32,
                     activation_fn=nn.LeakyReLU,  # Activation function
                     encoder_only=True,
                 ),
@@ -331,7 +332,7 @@ if __name__ == '__main__':
             output_wrapper=FullyObsImageWrapper,
         )
         runner.train(
-            session_dir=f"./experiments/mazes_4/run{i}",
+            session_dir=f"./experiments/mazes_32/run{i}",
             eval_freq=int(50e4),
             compute_info_freq=int(50e4),
             num_eval_episodes=10,

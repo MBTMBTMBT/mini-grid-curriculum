@@ -335,7 +335,7 @@ if __name__ == '__main__':
             output_wrapper=FullyObsImageWrapper,
         )
         runner.train(
-            session_dir=f"./experiments/mazes_48_8/run{i}",
+            session_dir=f"./experiments/mazes-128-16/run{i}",
             eval_freq=int(25e4),
             compute_info_freq=int(25e4),
             num_eval_episodes=10,

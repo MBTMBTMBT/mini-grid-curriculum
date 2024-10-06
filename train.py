@@ -232,7 +232,7 @@ class Trainer:
 if __name__ == '__main__':
     train_configs = []
     eval_configs = []
-    num_parallel: int = 12
+    num_parallel: int = 4
 
     ##################################################################
     config = TaskConfig()
@@ -316,14 +316,16 @@ if __name__ == '__main__':
             policy_kwargs=dict(
                 features_extractor_class=CNNVectorQuantizerEncoderExtractor,  # Use the custom encoder extractor
                 features_extractor_kwargs=dict(
-                    net_arch=None,  # Custom layer sizes
+                    net_arch=[],  # Custom layer sizes
                     cnn_net_arch=[
-                        (32, 3, 2, 1),
                         (64, 3, 2, 1),
-                        (128, 3, 2, 1),
+                        (64, 3, 2, 1),
+                        (64, 3, 2, 1),
+                        (64, 3, 2, 1),
+                        (64, 3, 2, 1),
                     ],
-                    embedding_dim=4,
-                    num_embeddings=32,
+                    embedding_dim=16,
+                    num_embeddings=128,
                     activation_fn=nn.LeakyReLU,  # Activation function
                     encoder_only=True,
                 ),
@@ -333,9 +335,9 @@ if __name__ == '__main__':
             output_wrapper=FullyObsImageWrapper,
         )
         runner.train(
-            session_dir=f"./experiments/mazes_32/run{i}",
-            eval_freq=int(50e4),
-            compute_info_freq=int(50e4),
+            session_dir=f"./experiments/mazes_48_8/run{i}",
+            eval_freq=int(25e4),
+            compute_info_freq=int(25e4),
             num_eval_episodes=10,
             eval_deterministic=False,
             start_time_step=0,

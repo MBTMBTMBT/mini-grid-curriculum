@@ -849,56 +849,12 @@ class VectorQuantizer(nn.Module):
         return z_q, min_indices
 
 
-# class MLPVectorQuantizerEncoderExtractor(BaseEncoderExtractor):
-#     def __init__(self, observation_space: gym.spaces.Box, net_arch=None, embedding_dim=64, num_embeddings=512,
-#                  activation_fn=nn.ReLU, encoder_only=True, action_space: gym.spaces.Discrete = None, weights=None):
-#         if net_arch is None:
-#             net_arch = [128, 64]
-#
-#         # UNSOLVED ISSUE WITH LAST LAYER OF NET ARCH
-#
-#         super(MLPVectorQuantizerEncoderExtractor, self).__init__(observation_space, net_arch=net_arch,
-#                                                                  encoder_only=encoder_only, action_space=action_space,
-#                                                                  weights=weights)
-#
-#         input_dim = observation_space.shape[0]
-#         encoder_layers = []
-#         for layer_size in net_arch:
-#             encoder_layers.append(nn.Linear(input_dim, layer_size))
-#             encoder_layers.append(activation_fn())
-#             input_dim = layer_size
-#
-#         self.encoder = nn.Sequential(*encoder_layers)
-#
-#         # Vector Quantizer
-#         self.vector_quantizer = VectorQuantizer(num_embeddings, embedding_dim)
-#
-#         post_quant_layers = []
-#         post_quant_layers.append(nn.Linear(embedding_dim, net_arch[-1]))  # Map to final output layer
-#         self.post_quant_mlp = nn.Sequential(*post_quant_layers)
-#
-#         # Set the features_dim and _features_dim to the final output layer size
-#         self._features_dim = net_arch[-1]
-#         self.commit_loss = torch.tensor(0.0, requires_grad=True).to(self.device)
-#         self.constant_losses.append(self.get_commit_loss)
-#
-#     def forward(self, observations: torch.Tensor) -> torch.Tensor:
-#         observations = observations.view(observations.size(0), -1)
-#         encoded = self.encoder(observations)
-#         z_q, min_indices = self.vector_quantizer(encoded)
-#         self.commit_loss = F.mse_loss(z_q.detach(), encoded) + F.mse_loss(z_q, encoded.detach())
-#         return self.post_quant_mlp(z_q)
-#
-#     def get_commit_loss(self):
-#         return self.commit_loss
-
-
 class CNNVectorQuantizerEncoderExtractor(BaseEncoderExtractor):
     def __init__(self, observation_space: gym.spaces.Box, net_arch=None, cnn_net_arch=None, embedding_dim=64,
                  num_embeddings=512, activation_fn=nn.ReLU, encoder_only=True, action_space: gym.spaces.Discrete=None,
                  weights=None):
         if net_arch is None:
-            net_arch = [embedding_dim]  # Default fully connected architecture after quantization
+            net_arch = []  # Empty architecture means no MLP layers
 
         if cnn_net_arch is None:
             # Default CNN architecture: [(out_channels, kernel_size, stride, padding)]
@@ -908,7 +864,7 @@ class CNNVectorQuantizerEncoderExtractor(BaseEncoderExtractor):
                 (128, 3, 2, 1),  # out_channels=128, kernel_size=3, stride=2, padding=1
             ]
 
-        # net_arch used only for knowing the input dimension for super so it should be embedding_dim
+        # net_arch used only for knowing the input dimension for discriminators in super so it should be embedding_dim
         super().__init__(observation_space, net_arch=[embedding_dim], encoder_only=encoder_only, action_space=action_space,
                          weights=weights)
 
@@ -931,18 +887,20 @@ class CNNVectorQuantizerEncoderExtractor(BaseEncoderExtractor):
                                                   (1, 1))  # Apply average pooling to get a fixed-size output
             conv_output_flattened_dim = pooled_output.numel()  # Use numel() to get the total number of elements
 
-        # MLP layers (from net_arch) applied after CNN and before Vector Quantizer
-        mlp_layers = []
-        input_dim = conv_output_flattened_dim
-        for layer_size in net_arch:
-            mlp_layers.append(nn.Linear(input_dim, layer_size))
-            mlp_layers.append(activation_fn())
-            input_dim = layer_size
+        # Only create MLP layers if net_arch is not empty
+        if len(net_arch) > 0:
+            mlp_layers = []
+            input_dim = conv_output_flattened_dim
+            for layer_size in net_arch:
+                mlp_layers.append(nn.Linear(input_dim, layer_size))
+                mlp_layers.append(activation_fn())
+                input_dim = layer_size
 
-        self.mlp = nn.Sequential(*mlp_layers)
-
-        # Linear layer to map MLP output to the embedding_dim
-        self.fc_to_embedding_dim = nn.Linear(input_dim, embedding_dim)
+            self.mlp = nn.Sequential(*mlp_layers)
+            self.fc_to_embedding_dim = nn.Linear(input_dim, embedding_dim)
+        else:
+            # If no MLP layers are specified, directly map CNN output to embedding_dim
+            self.fc_to_embedding_dim = nn.Linear(conv_output_flattened_dim, embedding_dim)
 
         # Vector Quantizer
         self.vector_quantizer = VectorQuantizer(num_embeddings, embedding_dim)
@@ -968,8 +926,11 @@ class CNNVectorQuantizerEncoderExtractor(BaseEncoderExtractor):
         # Flatten the pooled features
         flattened_features = pooled_features.view(batch_size, -1)
 
-        # Pass through MLP layers (from net_arch)
-        mlp_output = self.mlp(flattened_features)
+        # Pass through MLP layers (if they exist)
+        if hasattr(self, 'mlp'):
+            mlp_output = self.mlp(flattened_features)
+        else:
+            mlp_output = flattened_features
 
         # Map MLP output to embedding_dim
         embedded_features = self.fc_to_embedding_dim(mlp_output)

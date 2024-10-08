@@ -331,7 +331,7 @@ if __name__ == '__main__':
                 # ),
                 features_extractor_class=CNNEncoderExtractor,  # Use the custom encoder extractor
                 features_extractor_kwargs=dict(
-                    net_arch=[8],  # Custom layer sizes
+                    net_arch=[32],  # Custom layer sizes
                     cnn_net_arch=[
                         (64, 3, 2, 1),
                         (64, 3, 2, 1),
@@ -348,7 +348,7 @@ if __name__ == '__main__':
             output_wrapper=FullyObsImageWrapper,
         )
         runner.train(
-            session_dir=f"./experiments/mazes-bin-8/run{i}",
+            session_dir=f"./experiments/mazes-bin-32/run{i}",
             eval_freq=int(25e4),
             compute_info_freq=int(25e4),
             num_eval_episodes=10,

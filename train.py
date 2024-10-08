@@ -205,19 +205,19 @@ class Trainer:
                 max_iter=max_iter,
             )
 
-            # sigmoid_slope_manager_callback = SigmoidSlopeManagerCallback(
-            #     feature_model=model.policy.features_extractor,
-            #     total_train_steps=steps // num_parallel,
-            #     log_writer=log_writer,
-            #     start_timestep=start_time_step,
-            # )
+            sigmoid_slope_manager_callback = SigmoidSlopeManagerCallback(
+                feature_model=model.policy.features_extractor,
+                total_train_steps=steps // num_parallel,
+                log_writer=log_writer,
+                start_timestep=start_time_step,
+            )
 
             model.policy.features_extractor.unfreeze()
             model.policy.unfreeze_mlp_extractor()
 
             # callback_list = CallbackList(callbacks=[target_callback, eval_callback])
-            # callback_list = CallbackList(callbacks=[info_eval_callback, sigmoid_slope_manager_callback])
-            callback_list = CallbackList(callbacks=[info_eval_callback,])
+            callback_list = CallbackList(callbacks=[info_eval_callback, sigmoid_slope_manager_callback])
+            # callback_list = CallbackList(callbacks=[info_eval_callback,])
 
             # train
             model.learn(total_timesteps=steps, callback=callback_list, progress_bar=True)
@@ -314,9 +314,24 @@ if __name__ == '__main__':
             train_configs,
             eval_configs,
             policy_kwargs=dict(
-                features_extractor_class=CNNVectorQuantizerEncoderExtractor,  # Use the custom encoder extractor
+                # features_extractor_class=CNNVectorQuantizerEncoderExtractor,  # Use the custom encoder extractor
+                # features_extractor_kwargs=dict(
+                #     net_arch=[],  # Custom layer sizes
+                #     cnn_net_arch=[
+                #         (64, 3, 2, 1),
+                #         (64, 3, 2, 1),
+                #         (64, 3, 2, 1),
+                #         (64, 3, 2, 1),
+                #         (64, 3, 2, 1),
+                #     ],
+                #     embedding_dim=16,
+                #     num_embeddings=4096,
+                #     activation_fn=nn.LeakyReLU,  # Activation function
+                #     encoder_only=True,
+                # ),
+                features_extractor_class=CNNEncoderExtractor,  # Use the custom encoder extractor
                 features_extractor_kwargs=dict(
-                    net_arch=[],  # Custom layer sizes
+                    net_arch=[8],  # Custom layer sizes
                     cnn_net_arch=[
                         (64, 3, 2, 1),
                         (64, 3, 2, 1),
@@ -324,8 +339,6 @@ if __name__ == '__main__':
                         (64, 3, 2, 1),
                         (64, 3, 2, 1),
                     ],
-                    embedding_dim=16,
-                    num_embeddings=128,
                     activation_fn=nn.LeakyReLU,  # Activation function
                     encoder_only=True,
                 ),
@@ -335,7 +348,7 @@ if __name__ == '__main__':
             output_wrapper=FullyObsImageWrapper,
         )
         runner.train(
-            session_dir=f"./experiments/mazes-128-16/run{i}",
+            session_dir=f"./experiments/mazes-bin-8/run{i}",
             eval_freq=int(25e4),
             compute_info_freq=int(25e4),
             num_eval_episodes=10,

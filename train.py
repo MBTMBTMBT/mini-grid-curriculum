@@ -259,7 +259,7 @@ if __name__ == '__main__':
     config.display_mode = "middle"
     config.random_rotate = True
     config.random_flip = True
-    config.max_steps = 50
+    config.max_steps = 25
     config.start_pos = (7, 7)
     config.start_dir = 1
     eval_configs.append(config)
@@ -273,7 +273,7 @@ if __name__ == '__main__':
     config.display_mode = "middle"
     config.random_rotate = True
     config.random_flip = True
-    config.max_steps = 50
+    config.max_steps = 25
     config.start_pos = (7, 7)
     config.start_dir = 1
     eval_configs.append(config)
@@ -287,7 +287,7 @@ if __name__ == '__main__':
     config.display_mode = "middle"
     config.random_rotate = True
     config.random_flip = True
-    config.max_steps = 50
+    config.max_steps = 25
     config.start_pos = (7, 7)
     config.start_dir = 1
     eval_configs.append(config)
@@ -301,7 +301,7 @@ if __name__ == '__main__':
     config.display_mode = "middle"
     config.random_rotate = True
     config.random_flip = True
-    config.max_steps = 50
+    config.max_steps = 25
     config.start_pos = (7, 7)
     config.start_dir = 1
     eval_configs.append(config)
@@ -315,7 +315,7 @@ if __name__ == '__main__':
     config.display_mode = "middle"
     config.random_rotate = True
     config.random_flip = True
-    config.max_steps = 50
+    config.max_steps = 25
     config.start_pos = (7, 7)
     config.start_dir = 1
     eval_configs.append(config)
@@ -329,7 +329,7 @@ if __name__ == '__main__':
     config.display_mode = "middle"
     config.random_rotate = True
     config.random_flip = True
-    config.max_steps = 50
+    config.max_steps = 25
     config.start_pos = (7, 7)
     config.start_dir = 1
     eval_configs.append(config)

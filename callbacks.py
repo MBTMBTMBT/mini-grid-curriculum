@@ -390,7 +390,7 @@ class SigmoidSlopeManagerCallback(EventCallback):
         if self.n_calls / self.total_train_steps <= 0.33:
             self.feature_model.slope = 1.0
         elif 0.66 >= self.n_calls / self.total_train_steps > 0.33:
-            self.feature_model.slope = (self.n_calls / self.total_train_steps - 0.33) / 0.33 * 100.0
+            self.feature_model.slope = (self.n_calls / self.total_train_steps - 0.33) / 0.33 * 99.0 + 1.0
             # self.feature_model.slope = 2.0 ** ((self.n_calls + 1 - (self.total_train_steps * 0.33)) / (self.total_train_steps * 0.67) / 0.1)
         elif self.n_calls / self.total_train_steps > 0.66:
             self.feature_model.slope = 100.0

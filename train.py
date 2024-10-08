@@ -232,7 +232,7 @@ class Trainer:
 if __name__ == '__main__':
     train_configs = []
     eval_configs = []
-    num_parallel: int = 5
+    num_parallel: int = 4
 
     ##################################################################
     config = TaskConfig()
@@ -245,7 +245,7 @@ if __name__ == '__main__':
     config.random_rotate = True
     config.random_flip = True
     config.max_steps = 250
-    config.train_total_steps = 0.5e7
+    config.train_total_steps = 0.2e7
     config.difficulty_level = 0
     for _ in range(num_parallel):
         train_configs.append(config)
@@ -359,7 +359,7 @@ if __name__ == '__main__':
                 # ),
                 features_extractor_class=CNNEncoderExtractor,  # Use the custom encoder extractor
                 features_extractor_kwargs=dict(
-                    net_arch=[32],  # Custom layer sizes
+                    net_arch=[4],  # Custom layer sizes
                     cnn_net_arch=[
                         (64, 3, 2, 1),
                         (64, 3, 2, 1),
@@ -376,7 +376,7 @@ if __name__ == '__main__':
             output_wrapper=FullyObsImageWrapper,
         )
         runner.train(
-            session_dir=f"./experiments/mazes-bin-32/run{i}",
+            session_dir=f"./experiments/mazes-bin-4/run{i}",
             eval_freq=int(10e4),
             compute_info_freq=int(10e4),
             num_eval_episodes=20,

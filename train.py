@@ -232,84 +232,112 @@ class Trainer:
 if __name__ == '__main__':
     train_configs = []
     eval_configs = []
-    num_parallel: int = 4
+    num_parallel: int = 5
 
     ##################################################################
     config = TaskConfig()
-    config.name = "6"
-    config.rand_gen_shape = (6, 6)
+    config.name = "7"
+    config.rand_gen_shape = (7, 7)
     config.txt_file_path = None
     config.custom_mission = "reach the goal"
-    config.minimum_display_size = 6
+    config.minimum_display_size = 7
     config.display_mode = "random"
     config.random_rotate = True
     config.random_flip = True
-    config.max_steps = 500
+    config.max_steps = 250
     config.train_total_steps = 0.5e7
     config.difficulty_level = 0
     for _ in range(num_parallel):
         train_configs.append(config)
 
     config = TaskConfig()
-    config.name = "6-1"
+    config.name = "7-1"
     config.rand_gen_shape = None
-    config.txt_file_path = r"./maps/6-1.txt"
+    config.txt_file_path = r"./maps/7-1.txt"
     config.custom_mission = "reach the goal"
-    config.minimum_display_size = 6
+    config.minimum_display_size = 7
     config.display_mode = "middle"
     config.random_rotate = True
     config.random_flip = True
     config.max_steps = 50
-    config.start_pos = (6, 6)
+    config.start_pos = (7, 7)
     config.start_dir = 1
     eval_configs.append(config)
 
     config = TaskConfig()
-    config.name = "6-2"
+    config.name = "7-2"
     config.rand_gen_shape = None
-    config.txt_file_path = r"./maps/6-2.txt"
+    config.txt_file_path = r"./maps/7-2.txt"
     config.custom_mission = "reach the goal"
-    config.minimum_display_size = 6
+    config.minimum_display_size = 7
     config.display_mode = "middle"
     config.random_rotate = True
     config.random_flip = True
     config.max_steps = 50
-    config.start_pos = (6, 6)
+    config.start_pos = (7, 7)
     config.start_dir = 1
     eval_configs.append(config)
 
     config = TaskConfig()
-    config.name = "6-3"
+    config.name = "7-3"
     config.rand_gen_shape = None
-    config.txt_file_path = r"./maps/6-3.txt"
+    config.txt_file_path = r"./maps/7-3.txt"
     config.custom_mission = "reach the goal"
-    config.minimum_display_size = 6
+    config.minimum_display_size = 7
     config.display_mode = "middle"
     config.random_rotate = True
     config.random_flip = True
     config.max_steps = 50
-    config.start_pos = (6, 6)
+    config.start_pos = (7, 7)
     config.start_dir = 1
     eval_configs.append(config)
 
     config = TaskConfig()
-    config.name = "6-4"
+    config.name = "7-4"
     config.rand_gen_shape = None
-    config.txt_file_path = r"./maps/6-4.txt"
+    config.txt_file_path = r"./maps/7-4.txt"
     config.custom_mission = "reach the goal"
-    config.minimum_display_size = 6
+    config.minimum_display_size = 7
     config.display_mode = "middle"
     config.random_rotate = True
     config.random_flip = True
     config.max_steps = 50
-    config.start_pos = (6, 6)
+    config.start_pos = (7, 7)
+    config.start_dir = 1
+    eval_configs.append(config)
+
+    config = TaskConfig()
+    config.name = "7-5"
+    config.rand_gen_shape = None
+    config.txt_file_path = r"./maps/7-5.txt"
+    config.custom_mission = "reach the goal"
+    config.minimum_display_size = 7
+    config.display_mode = "middle"
+    config.random_rotate = True
+    config.random_flip = True
+    config.max_steps = 50
+    config.start_pos = (7, 7)
+    config.start_dir = 1
+    eval_configs.append(config)
+
+    config = TaskConfig()
+    config.name = "7-6"
+    config.rand_gen_shape = None
+    config.txt_file_path = r"./maps/7-6.txt"
+    config.custom_mission = "reach the goal"
+    config.minimum_display_size = 7
+    config.display_mode = "middle"
+    config.random_rotate = True
+    config.random_flip = True
+    config.max_steps = 50
+    config.start_pos = (7, 7)
     config.start_dir = 1
     eval_configs.append(config)
 
     ##################################################################
 
     # encoder = None  # test non encoding case
-    for i in range(1):
+    for i in range(3):
         runner = Trainer(
             train_configs,
             eval_configs,
@@ -349,9 +377,9 @@ if __name__ == '__main__':
         )
         runner.train(
             session_dir=f"./experiments/mazes-bin-32/run{i}",
-            eval_freq=int(25e4),
-            compute_info_freq=int(25e4),
-            num_eval_episodes=10,
+            eval_freq=int(10e4),
+            compute_info_freq=int(10e4),
+            num_eval_episodes=20,
             eval_deterministic=False,
             start_time_step=0,
             iter_gamma=0.999,

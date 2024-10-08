@@ -186,10 +186,11 @@ class EncodingMDPLearner(OneHotEncodingMDPLearner):
                     if current_state_action_code not in self.state_action_set:
                         self.env.set_env_with_code(current_state_obs)
                         next_obs, reward, done, truncated, info = self.env.step(action)
+                        next_true_obs = next_obs
                         if len(next_obs.shape) > 1:
                             next_obs = info['encoded_obs']
                         next_state_code = numpy_binary_array_to_string(next_obs)
-                        self.true_obs_dict[next_state_code] = true_obs.squeeze()
+                        self.true_obs_dict[next_state_code] = next_true_obs.squeeze()
 
                         current_state_action_state_code = str(current_state_code) + "-" + str(action) + "-" + str(next_state_code)
                         self.state_action_state_to_reward_dict[current_state_action_state_code] = reward
@@ -208,6 +209,8 @@ class EncodingMDPLearner(OneHotEncodingMDPLearner):
                         if verbose >= 1:
                             print(f"Added [state-action pair num: {state_action_count}]: {hash(current_state_action_code)} -- {action} -> {hash(next_state_code)} Reward: {reward}")
 
+                        a = hex(int(self.encode_str(current_state_code)[0:self.keep_dims], 2))
+                        b = hex(int(self.encode_str(next_state_code)[0:self.keep_dims], 2))
                         self.mdp_graph.add_transition(hex(int(self.encode_str(current_state_code)[0:self.keep_dims], 2)), action, hex(int(self.encode_str(next_state_code)[0:self.keep_dims], 2)), 1.0)
                         self.mdp_graph.add_reward(hex(int(self.encode_str(current_state_code)[0:self.keep_dims], 2)), action, hex(int(self.encode_str(current_state_code)[0:self.keep_dims], 2)), float(reward))
             for new_state_code in new_state_set:

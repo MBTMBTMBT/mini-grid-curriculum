@@ -387,15 +387,15 @@ class SigmoidSlopeManagerCallback(EventCallback):
     def _on_step(self) -> bool:
         # Evaluate the model at specified frequency
         # print(self.n_calls, self.total_train_steps, 2.0 ** ((self.n_calls + 1 - (self.total_train_steps * 0.5)) / (self.total_train_steps * 0.5)) / 0.125)
-        if self.n_calls / self.total_train_steps > 0.33:
-            self.feature_model.slope = 2.0 ** ((self.n_calls + 1 - (self.total_train_steps * 0.33)) / (self.total_train_steps * 0.67) / 0.1)
-        if self.feature_model.slope > 20.0:
+        if self.n_calls / self.total_train_steps <= 0.33:
+            self.feature_model.slope = 1.0
+        elif 0.66 >= self.n_calls / self.total_train_steps > 0.33:
+            self.feature_model.slope = (self.n_calls / self.total_train_steps - 0.33) / 0.33 * 100.0
+            # self.feature_model.slope = 2.0 ** ((self.n_calls + 1 - (self.total_train_steps * 0.33)) / (self.total_train_steps * 0.67) / 0.1)
+        elif self.n_calls / self.total_train_steps > 0.66:
+            self.feature_model.slope = 100.0
+        if self.n_calls / self.total_train_steps > 0.5:
             self.feature_model.binary_output = True
-            # print("===== Start to use binary latent space! =====")
-        # else:
-        #     self.feature_model.binary_output = False
-        if self.feature_model.slope > 50.0:
-            self.feature_model.slope = 50.0
         if self.n_calls % int(1e3) == 0:
             self.log_writer.add_scalar(
                 f'sigmoid slope', self.feature_model.slope, self.num_timesteps + self.start_timestep

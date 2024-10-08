@@ -245,7 +245,7 @@ if __name__ == '__main__':
     config.random_rotate = True
     config.random_flip = True
     config.max_steps = 250
-    config.train_total_steps = 0.2e7
+    config.train_total_steps = 0.1e7
     config.difficulty_level = 0
     for _ in range(num_parallel):
         train_configs.append(config)

@@ -124,6 +124,7 @@ class Trainer:
                     random_flip=env_config.random_flip,
                     custom_mission=env_config.custom_mission,
                     max_steps=env_config.max_steps,
+                    # todo: something else
                 )
             )
 
@@ -260,7 +261,7 @@ if __name__ == '__main__':
     config.random_rotate = True
     config.random_flip = True
     config.max_steps = 25
-    config.start_pos = (7, 7)
+    config.start_pos = (5, 5)
     config.start_dir = 1
     eval_configs.append(config)
 
@@ -274,7 +275,7 @@ if __name__ == '__main__':
     config.random_rotate = True
     config.random_flip = True
     config.max_steps = 25
-    config.start_pos = (7, 7)
+    config.start_pos = (5, 5)
     config.start_dir = 1
     eval_configs.append(config)
 
@@ -288,7 +289,7 @@ if __name__ == '__main__':
     config.random_rotate = True
     config.random_flip = True
     config.max_steps = 25
-    config.start_pos = (7, 7)
+    config.start_pos = (5, 5)
     config.start_dir = 1
     eval_configs.append(config)
 
@@ -302,7 +303,7 @@ if __name__ == '__main__':
     config.random_rotate = True
     config.random_flip = True
     config.max_steps = 25
-    config.start_pos = (7, 7)
+    config.start_pos = (5, 5)
     config.start_dir = 1
     eval_configs.append(config)
 
@@ -316,7 +317,7 @@ if __name__ == '__main__':
     config.random_rotate = True
     config.random_flip = True
     config.max_steps = 25
-    config.start_pos = (7, 7)
+    config.start_pos = (5, 5)
     config.start_dir = 1
     eval_configs.append(config)
 
@@ -330,7 +331,7 @@ if __name__ == '__main__':
     config.random_rotate = True
     config.random_flip = True
     config.max_steps = 25
-    config.start_pos = (7, 7)
+    config.start_pos = (5, 5)
     config.start_dir = 1
     eval_configs.append(config)
 
@@ -359,7 +360,7 @@ if __name__ == '__main__':
                 # ),
                 features_extractor_class=CNNEncoderExtractor,  # Use the custom encoder extractor
                 features_extractor_kwargs=dict(
-                    net_arch=[4],  # Custom layer sizes
+                    net_arch=[32],  # Custom layer sizes
                     cnn_net_arch=[
                         (64, 3, 2, 1),
                         (64, 3, 2, 1),
@@ -376,9 +377,9 @@ if __name__ == '__main__':
             output_wrapper=FullyObsImageWrapper,
         )
         runner.train(
-            session_dir=f"./experiments/mazes-bin-4/run{i}",
-            eval_freq=int(10e4),
-            compute_info_freq=int(10e4),
+            session_dir=f"./experiments/mazes-bin-32/run{i}",
+            eval_freq=int(2e4),
+            compute_info_freq=int(2e4),
             num_eval_episodes=20,
             eval_deterministic=False,
             start_time_step=0,

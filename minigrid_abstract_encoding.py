@@ -223,6 +223,7 @@ class EncodingMDPLearner(OneHotEncodingMDPLearner):
                 self.encoded_state_to_unencoded_state_dict[hex(int(self.encode_str(new_state_code)[0:self.keep_dims], 2))].add(new_state_code)
             for new_state_action_code in new_state_action_set:
                 self.state_action_set.add(new_state_action_code)
+            print(len(new_state_set), len(new_state_action_set))
             if len(new_state_set) == 0 and len(new_state_action_set) == 0:
                 break
 

@@ -125,8 +125,8 @@ class Trainer:
                     random_flip=env_config.random_flip,
                     custom_mission=env_config.custom_mission,
                     max_steps=env_config.max_steps,
-                    start_pos=env_config.start_pos,
-                    start_dir=env_config.start_dir,
+                    agent_start_pos=env_config.start_pos,
+                    agent_start_dir=env_config.start_dir,
                     add_random_door_key=env_config.add_random_door_key,
                 )
             )

@@ -262,8 +262,8 @@ if __name__ == '__main__':
     config.display_mode = "random"
     config.random_rotate = True
     config.random_flip = True
-    config.max_steps = 250
-    config.train_total_steps = 0.5e7
+    config.max_steps = 500
+    config.train_total_steps = 2.5e7
     config.difficulty_level = 0
     config.add_random_door_key=True
     for _ in range(num_parallel):

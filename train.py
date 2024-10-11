@@ -34,6 +34,7 @@ class TaskConfig:
         self.max_steps: int = 0
         self.start_pos: Tuple[int, int] or None = None
         self.start_dir: Optional[int] = None
+        self.add_random_door_key: bool = False
 
         self.train_total_steps: int = 0
         self.difficulty_level: int = 0
@@ -124,7 +125,9 @@ class Trainer:
                     random_flip=env_config.random_flip,
                     custom_mission=env_config.custom_mission,
                     max_steps=env_config.max_steps,
-                    # todo: something else
+                    start_pos=env_config.start_pos,
+                    start_dir=env_config.start_dir,
+                    add_random_door_key=env_config.add_random_door_key,
                 )
             )
 
@@ -246,8 +249,9 @@ if __name__ == '__main__':
     config.random_rotate = True
     config.random_flip = True
     config.max_steps = 250
-    config.train_total_steps = 0.1e7
+    config.train_total_steps = 0.5e7
     config.difficulty_level = 0
+    config.add_random_door_key=True
     for _ in range(num_parallel):
         train_configs.append(config)
 
@@ -360,7 +364,7 @@ if __name__ == '__main__':
                 # ),
                 features_extractor_class=CNNEncoderExtractor,  # Use the custom encoder extractor
                 features_extractor_kwargs=dict(
-                    net_arch=[32],  # Custom layer sizes
+                    net_arch=[12],  # Custom layer sizes
                     cnn_net_arch=[
                         (64, 3, 2, 1),
                         (64, 3, 2, 1),
@@ -377,14 +381,14 @@ if __name__ == '__main__':
             output_wrapper=FullyObsImageWrapper,
         )
         runner.train(
-            session_dir=f"./experiments/mazes-bin-32/run{i}",
-            eval_freq=int(2e4),
-            compute_info_freq=int(2e4),
-            num_eval_episodes=20,
+            session_dir=f"./experiments/mazes-bin-12/run{i}",
+            eval_freq=int(2.5e4),
+            compute_info_freq=int(2.5e4),
+            num_eval_episodes=25,
             eval_deterministic=False,
             start_time_step=0,
             iter_gamma=0.999,
-            iter_threshold=1e-5,
+            iter_threshold=5e-5,
             max_iter=int(1e5),
             num_parallel=num_parallel,
         )

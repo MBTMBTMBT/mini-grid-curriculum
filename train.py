@@ -191,22 +191,35 @@ class Trainer:
                 print("Initialized new model.")
                 load_path = os.path.join(model_save_dir, f"saved_model_latest.zip")
 
-            info_eval_callback = InfoEvalSaveCallback(
+            # info_eval_callback = InfoEvalSaveCallback(
+            #     eval_envs=eval_env_list,
+            #     eval_env_names=eval_env_name_list,
+            #     model=model,
+            #     model_save_dir=model_save_dir,
+            #     model_save_name=f"saved_model",
+            #     log_writer=log_writer,
+            #     eval_freq=eval_freq // num_parallel,
+            #     compute_info_freq=compute_info_freq // num_parallel,
+            #     n_eval_episodes=num_eval_episodes,
+            #     deterministic=eval_deterministic,
+            #     verbose=1,
+            #     start_timestep=start_time_step,
+            #     iter_gamma=iter_gamma,
+            #     iter_threshold=iter_threshold,
+            #     max_iter=max_iter,
+            # )
+
+            eval_callback = EvalSaveCallback(
                 eval_envs=eval_env_list,
                 eval_env_names=eval_env_name_list,
-                model=model,
                 model_save_dir=model_save_dir,
                 model_save_name=f"saved_model",
                 log_writer=log_writer,
                 eval_freq=eval_freq // num_parallel,
-                compute_info_freq=compute_info_freq // num_parallel,
                 n_eval_episodes=num_eval_episodes,
                 deterministic=eval_deterministic,
                 verbose=1,
                 start_timestep=start_time_step,
-                iter_gamma=iter_gamma,
-                iter_threshold=iter_threshold,
-                max_iter=max_iter,
             )
 
             sigmoid_slope_manager_callback = SigmoidSlopeManagerCallback(
@@ -220,14 +233,15 @@ class Trainer:
             model.policy.unfreeze_mlp_extractor()
 
             # callback_list = CallbackList(callbacks=[target_callback, eval_callback])
-            callback_list = CallbackList(callbacks=[info_eval_callback, sigmoid_slope_manager_callback])
+            # callback_list = CallbackList(callbacks=[info_eval_callback, sigmoid_slope_manager_callback])
+            callback_list = CallbackList(callbacks=[eval_callback, sigmoid_slope_manager_callback])
             # callback_list = CallbackList(callbacks=[info_eval_callback,])
 
             # train
             model.learn(total_timesteps=steps, callback=callback_list, progress_bar=True)
 
             # accumulated timestep
-            start_time_step += info_eval_callback.num_timesteps
+            start_time_step += eval_callback.num_timesteps
 
         # close the writer
         log_writer.close()

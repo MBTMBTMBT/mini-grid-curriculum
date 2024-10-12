@@ -222,20 +222,21 @@ class Trainer:
                 start_timestep=start_time_step,
             )
 
-            sigmoid_slope_manager_callback = SigmoidSlopeManagerCallback(
-                feature_model=model.policy.features_extractor,
-                total_train_steps=steps // num_parallel,
-                log_writer=log_writer,
-                start_timestep=start_time_step,
-            )
+            # sigmoid_slope_manager_callback = SigmoidSlopeManagerCallback(
+            #     feature_model=model.policy.features_extractor,
+            #     total_train_steps=steps // num_parallel,
+            #     log_writer=log_writer,
+            #     start_timestep=start_time_step,
+            # )
 
             model.policy.features_extractor.unfreeze()
             model.policy.unfreeze_mlp_extractor()
 
             # callback_list = CallbackList(callbacks=[target_callback, eval_callback])
             # callback_list = CallbackList(callbacks=[info_eval_callback, sigmoid_slope_manager_callback])
-            callback_list = CallbackList(callbacks=[eval_callback, sigmoid_slope_manager_callback])
+            # callback_list = CallbackList(callbacks=[eval_callback, sigmoid_slope_manager_callback])
             # callback_list = CallbackList(callbacks=[info_eval_callback,])
+            callback_list = CallbackList(callbacks=[eval_callback])
 
             # train
             model.learn(total_timesteps=steps, callback=callback_list, progress_bar=True)
@@ -250,7 +251,7 @@ class Trainer:
 if __name__ == '__main__':
     train_configs = []
     eval_configs = []
-    num_parallel: int = 4
+    num_parallel: int = 8
 
     ##################################################################
     config = TaskConfig()
@@ -262,7 +263,7 @@ if __name__ == '__main__':
     config.display_mode = "random"
     config.random_rotate = True
     config.random_flip = True
-    config.max_steps = 500
+    config.max_steps = 250
     config.train_total_steps = 2.5e7
     config.difficulty_level = 0
     config.add_random_door_key=True
@@ -378,13 +379,13 @@ if __name__ == '__main__':
                 # ),
                 features_extractor_class=CNNEncoderExtractor,  # Use the custom encoder extractor
                 features_extractor_kwargs=dict(
-                    net_arch=[12],  # Custom layer sizes
+                    net_arch=[32],  # Custom layer sizes
                     cnn_net_arch=[
                         (64, 3, 2, 1),
-                        (64, 3, 2, 1),
-                        (64, 3, 2, 1),
-                        (64, 3, 2, 1),
-                        (64, 3, 2, 1),
+                        (128, 3, 2, 1),
+                        (256, 3, 2, 1),
+                        (512, 3, 2, 1),
+                        (1024, 3, 2, 1),
                     ],
                     activation_fn=nn.LeakyReLU,  # Activation function
                     encoder_only=True,
@@ -395,10 +396,10 @@ if __name__ == '__main__':
             output_wrapper=FullyObsImageWrapper,
         )
         runner.train(
-            session_dir=f"./experiments/mazes-bin-12/run{i}",
+            session_dir=f"./experiments/mazes-bin-32/run{i}",
             eval_freq=int(2.5e4),
             compute_info_freq=int(2.5e4),
-            num_eval_episodes=25,
+            num_eval_episodes=50,
             eval_deterministic=False,
             start_time_step=0,
             iter_gamma=0.999,

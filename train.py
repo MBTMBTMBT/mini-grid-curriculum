@@ -251,108 +251,42 @@ class Trainer:
 if __name__ == '__main__':
     train_configs = []
     eval_configs = []
-    num_parallel: int = 8
+    # num_parallel: int = 8
 
     ##################################################################
-    config = TaskConfig()
-    config.name = "7"
-    config.rand_gen_shape = (7, 7)
-    config.txt_file_path = None
-    config.custom_mission = "reach the goal"
-    config.minimum_display_size = 7
-    config.display_mode = "random"
-    config.random_rotate = True
-    config.random_flip = True
-    config.max_steps = 250
-    config.train_total_steps = 2.5e7
-    config.difficulty_level = 0
-    config.add_random_door_key=True
-    for _ in range(num_parallel):
+    for i in range(1, 9):
+        config = TaskConfig()
+        config.name = f"7-{i}"
+        config.rand_gen_shape = None
+        config.txt_file_path = f"./maps/7-{i}.txt"
+        config.custom_mission = "reach the goal"
+        config.minimum_display_size = 7
+        config.display_mode = "random"
+        config.random_rotate = True
+        config.random_flip = True
+        config.max_steps = 250
+        config.start_pos = (5, 5)
+        config.train_total_steps = 2.5e7
+        config.difficulty_level = 0
+        config.add_random_door_key=False
         train_configs.append(config)
+    # for _ in range(num_parallel):
+    #     train_configs.append(config)
 
-    config = TaskConfig()
-    config.name = "7-1"
-    config.rand_gen_shape = None
-    config.txt_file_path = r"./maps/7-1.txt"
-    config.custom_mission = "reach the goal"
-    config.minimum_display_size = 7
-    config.display_mode = "middle"
-    config.random_rotate = True
-    config.random_flip = True
-    config.max_steps = 25
-    config.start_pos = (5, 5)
-    config.start_dir = 1
-    eval_configs.append(config)
-
-    config = TaskConfig()
-    config.name = "7-2"
-    config.rand_gen_shape = None
-    config.txt_file_path = r"./maps/7-2.txt"
-    config.custom_mission = "reach the goal"
-    config.minimum_display_size = 7
-    config.display_mode = "middle"
-    config.random_rotate = True
-    config.random_flip = True
-    config.max_steps = 25
-    config.start_pos = (5, 5)
-    config.start_dir = 1
-    eval_configs.append(config)
-
-    config = TaskConfig()
-    config.name = "7-3"
-    config.rand_gen_shape = None
-    config.txt_file_path = r"./maps/7-3.txt"
-    config.custom_mission = "reach the goal"
-    config.minimum_display_size = 7
-    config.display_mode = "middle"
-    config.random_rotate = True
-    config.random_flip = True
-    config.max_steps = 25
-    config.start_pos = (5, 5)
-    config.start_dir = 1
-    eval_configs.append(config)
-
-    config = TaskConfig()
-    config.name = "7-4"
-    config.rand_gen_shape = None
-    config.txt_file_path = r"./maps/7-4.txt"
-    config.custom_mission = "reach the goal"
-    config.minimum_display_size = 7
-    config.display_mode = "middle"
-    config.random_rotate = True
-    config.random_flip = True
-    config.max_steps = 25
-    config.start_pos = (5, 5)
-    config.start_dir = 1
-    eval_configs.append(config)
-
-    config = TaskConfig()
-    config.name = "7-5"
-    config.rand_gen_shape = None
-    config.txt_file_path = r"./maps/7-5.txt"
-    config.custom_mission = "reach the goal"
-    config.minimum_display_size = 7
-    config.display_mode = "middle"
-    config.random_rotate = True
-    config.random_flip = True
-    config.max_steps = 25
-    config.start_pos = (5, 5)
-    config.start_dir = 1
-    eval_configs.append(config)
-
-    config = TaskConfig()
-    config.name = "7-6"
-    config.rand_gen_shape = None
-    config.txt_file_path = r"./maps/7-6.txt"
-    config.custom_mission = "reach the goal"
-    config.minimum_display_size = 7
-    config.display_mode = "middle"
-    config.random_rotate = True
-    config.random_flip = True
-    config.max_steps = 25
-    config.start_pos = (5, 5)
-    config.start_dir = 1
-    eval_configs.append(config)
+    for i in range(1, 9):
+        config = TaskConfig()
+        config.name = f"7-{i}"
+        config.rand_gen_shape = None
+        config.txt_file_path = f"./maps/7-{i}.txt"
+        config.custom_mission = "reach the goal"
+        config.minimum_display_size = 7
+        config.display_mode = "middle"
+        config.random_rotate = True
+        config.random_flip = True
+        config.max_steps = 50
+        config.start_pos = (5, 5)
+        config.start_dir = 1
+        eval_configs.append(config)
 
     ##################################################################
 
@@ -405,5 +339,5 @@ if __name__ == '__main__':
             iter_gamma=0.999,
             iter_threshold=5e-5,
             max_iter=int(1e5),
-            num_parallel=num_parallel,
+            num_parallel=8,
         )

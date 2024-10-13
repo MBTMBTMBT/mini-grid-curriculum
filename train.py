@@ -273,7 +273,7 @@ if __name__ == '__main__':
     # for _ in range(num_parallel):
     #     train_configs.append(config)
 
-    for i in range(1, 9):
+    for i in range(1, 7):
         config = TaskConfig()
         config.name = f"7-{i}"
         config.rand_gen_shape = None

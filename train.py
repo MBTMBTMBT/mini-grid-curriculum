@@ -254,7 +254,7 @@ if __name__ == '__main__':
     # num_parallel: int = 8
 
     ##################################################################
-    for i in range(1, 9):
+    for i in range(1, 7):
         config = TaskConfig()
         config.name = f"7-{i}"
         config.rand_gen_shape = None
@@ -264,7 +264,7 @@ if __name__ == '__main__':
         config.display_mode = "random"
         config.random_rotate = True
         config.random_flip = True
-        config.max_steps = 250
+        config.max_steps = 500
         config.start_pos = (5, 5)
         config.train_total_steps = 2.5e7
         config.difficulty_level = 0

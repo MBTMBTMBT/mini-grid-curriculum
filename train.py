@@ -186,8 +186,18 @@ class Trainer:
                 model = CustomPPO.load(load_path, env=env)
                 model.log_dir = log_dir
             else:
-                model = CustomPPO(CustomActorCriticPolicy, env=env, policy_kwargs=self.policy_kwargs, verbose=1,
-                                  log_dir=log_dir)
+                model = CustomPPO(
+                    CustomActorCriticPolicy,
+                    env=env,
+                    n_steps=16384,
+                    batch_size=32,
+                    n_epochs=10,
+                    clip_range=0.4,
+                    clip_range_vf=None,
+                    policy_kwargs=self.policy_kwargs,
+                    verbose=1,
+                    log_dir=log_dir,
+                )
                 print("Initialized new model.")
                 load_path = os.path.join(model_save_dir, f"saved_model_latest.zip")
 
@@ -264,7 +274,7 @@ if __name__ == '__main__':
         config.display_mode = "random"
         config.random_rotate = True
         config.random_flip = True
-        config.max_steps = 500
+        config.max_steps = 1024
         config.start_pos = (5, 5)
         config.train_total_steps = 2.5e7
         config.difficulty_level = 0

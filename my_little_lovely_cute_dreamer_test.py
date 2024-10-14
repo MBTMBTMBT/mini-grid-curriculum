@@ -1,3 +1,5 @@
+from unittest.mock import inplace
+
 import numpy as np
 import torch
 import torch.nn as nn
@@ -7,6 +9,7 @@ from gymnasium.wrappers import FrameStack, AtariPreprocessing, LazyFrames
 from gymnasium.vector import AsyncVectorEnv
 import torch.nn.functional as F
 import torchvision.transforms as T
+torch.autograd.set_detect_anomaly(True)
 
 
 # Function to calculate the input size based on the cnn_net_arch and target latent size
@@ -72,6 +75,54 @@ class Decoder(nn.Module):
         if len(latent_state.shape) == 3:  # 如果输入缺少批次维度
             latent_state = latent_state.unsqueeze(0)  # 添加批次维度
         return self.decoder(latent_state)
+
+
+class Discriminator(nn.Module):
+    def __init__(self, input_shape, conv_arch):
+        """
+        :param input_shape: 输入图像的形状 (channels, height, width)
+        :param conv_arch: 判别器卷积层的架构
+        """
+        super(Discriminator, self).__init__()
+        channels, height, width = input_shape
+
+        # 判别器的卷积层架构
+        conv_layers = []
+        in_channels = channels
+        for out_channels, kernel_size, stride, padding in conv_arch:
+            conv_layers.append(nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding))
+            conv_layers.append(nn.LeakyReLU(0.2))
+            in_channels = out_channels
+
+        self.conv_layers = nn.Sequential(*conv_layers)
+
+        # 全局平均池化，将特征图缩小为 (batch_size, out_channels, 1, 1)
+        self.global_avg_pool = nn.AdaptiveAvgPool2d(1)
+
+        # 通过一个假设的输入张量，动态计算展平后的大小
+        flattened_size = self._get_flattened_size(input_shape, conv_arch)
+
+        # 全连接层，输出一个标量，表示该图像是“真实”的概率
+        self.fc = nn.Sequential(
+            nn.Linear(flattened_size, 1),  # 输入是全局平均池化后的通道数
+            nn.Sigmoid()  # 输出范围在[0, 1]之间
+        )
+
+    def _get_flattened_size(self, input_shape, conv_arch):
+        """
+        通过给定的卷积架构和输入形状，动态计算展平后的大小
+        """
+        # 创建一个假定的输入张量
+        sample_tensor = torch.zeros(1, *input_shape)  # 假设 batch_size = 1
+        sample_tensor = self.conv_layers(sample_tensor)
+        sample_tensor = self.global_avg_pool(sample_tensor)
+        return sample_tensor.numel()  # 返回展平后的大小
+
+    def forward(self, x):
+        x = self.conv_layers(x)  # 经过卷积层处理
+        x = self.global_avg_pool(x)  # 全局平均池化 (batch_size, out_channels, 1, 1)
+        x = torch.flatten(x, 1)  # 展平成 (batch_size, out_channels)
+        return self.fc(x)
 
 
 class TransitionModelVAE(nn.Module):
@@ -243,19 +294,30 @@ class Critic(nn.Module):
 
 # DreamerAgent: 包含Encoder, Decoder, TransitionModel, Actor, Critic
 class DreamerAgent:
-    def __init__(self, env, latent_shape, cnn_net_arch, transition_model_conv_arch, actor_conv_arch, critic_conv_arch, gamma=0.99):
+    def __init__(self, env, latent_shape, cnn_net_arch, transition_model_conv_arch, actor_conv_arch, critic_conv_arch, disc_conv_arch, gamma=0.99):
         self.env = env
         self.encoder = Encoder(env.single_observation_space.shape, latent_shape, cnn_net_arch).to(device)
         self.decoder = Decoder(latent_shape, env.single_observation_space.shape, cnn_net_arch).to(device)
         self.transition_model = TransitionModelVAE(latent_shape, env.single_action_space.n, transition_model_conv_arch).to(device)
         self.actor = Actor(latent_shape, env.single_action_space.n, actor_conv_arch).to(device)
         self.critic = Critic(latent_shape, critic_conv_arch).to(device)
+        self.discriminator = Discriminator(env.single_observation_space.shape, disc_conv_arch).to(device)
+
         self.gamma = gamma
+
+        # Optimizer for all components except the discriminator
         self.optimizer = optim.Adam(list(self.encoder.parameters()) +
                                     list(self.decoder.parameters()) +
                                     list(self.transition_model.parameters()) +
                                     list(self.actor.parameters()) +
                                     list(self.critic.parameters()), lr=1e-4)
+
+        # Separate optimizer for the discriminator
+        self.discriminator_optimizer = optim.Adam(self.discriminator.parameters(), lr=1e-4)
+
+        # Loss functions
+        self.adversarial_loss = nn.BCELoss()
+        self.mse_loss = nn.MSELoss()
 
     def reset(self):
         obs, _ = self.env.reset()  # 在 gymnasium 中 reset 返回 (obs, info)
@@ -266,51 +328,81 @@ class DreamerAgent:
             latent_state = self.encoder(state)
             action_probs = self.actor(latent_state)
             action = torch.multinomial(action_probs, 1).squeeze(1)  # (batch_size,)
-
-            # 将动作转换为one-hot编码
             action_one_hot = F.one_hot(action, num_classes=self.env.single_action_space.n).float()  # (batch_size, action_dim)
             return action_one_hot, action
 
     def train(self, state, action, reward, next_state, done):
-        # 编码当前状态和下一个真实状态
+        # Encode the current and next state
         latent_state = self.encoder(state)
-        latent_next_state = self.encoder(next_state)  # 保持next_state为编码后的真实下一个状态
+        latent_next_state = self.encoder(next_state)
 
-        # 使用Transition Model预测下一个潜在状态和奖励
+        # Predict the next latent state and reward with the transition model
         predicted_next_state, mean, logvar, predicted_reward = self.transition_model(latent_state, action)
 
-        # 通过Decoder重建预测的图像观测
+        # Reconstruct the predicted next state
         reconstructed_state = self.decoder(predicted_next_state)
 
-        # 将next_state调整到与重构图像相同的大小
-        resized_next_state = F.interpolate(next_state, size=reconstructed_state.shape[2:], mode='bilinear',
-                                           align_corners=False)
+        # **Resize the next state** to match the size of the reconstructed state
+        resized_next_state = F.interpolate(next_state, size=reconstructed_state.shape[2:], mode='bilinear', align_corners=False)
 
-        # 计算VAE损失：重构损失和KL散度
-        recon_loss = nn.MSELoss()(reconstructed_state, resized_next_state)  # 使用调整后的next_state作为目标
+        # --------------------
+        # Discriminator Training
+        # --------------------
+        real_labels = torch.ones(state.size(0), 1).to(device)
+        fake_labels = torch.zeros(state.size(0), 1).to(device)
+
+        # Train discriminator on real and fake images
+        real_outputs = self.discriminator(resized_next_state)
+        fake_outputs = self.discriminator(reconstructed_state.detach())
+
+        d_real_loss = self.adversarial_loss(real_outputs, real_labels)
+        d_fake_loss = self.adversarial_loss(fake_outputs, fake_labels)
+        discriminator_loss = (d_real_loss + d_fake_loss) / 2
+
+        self.discriminator_optimizer.zero_grad()
+        discriminator_loss.backward()
+        self.discriminator_optimizer.step()
+
+        # --------------------
+        # Generator (Decoder) Loss
+        # --------------------
+        # Try to fool the discriminator with the generated image
+        g_fake_outputs = self.discriminator(reconstructed_state)
+        generator_loss = self.adversarial_loss(g_fake_outputs, real_labels)
+
+        # --------------------
+        # VAE Loss (Reconstruction + KL Divergence)
+        # --------------------
+        recon_loss = self.mse_loss(reconstructed_state, resized_next_state)
         kl_loss = -0.5 * torch.sum(1 + logvar - mean.pow(2) - logvar.exp())
         vae_loss = recon_loss + kl_loss
 
-        # 奖励损失：使用MSELoss衡量预测奖励与真实奖励之间的误差
-        reward_loss = nn.MSELoss()(predicted_reward.squeeze(), reward)
+        # --------------------
+        # Reward Prediction Loss
+        # --------------------
+        reward_loss = self.mse_loss(predicted_reward.squeeze(), reward)
 
-        # Critic损失：TD误差
+        # --------------------
+        # Critic Loss (TD error)
+        # --------------------
         critic_value = self.critic(latent_state)
         next_value = self.critic(latent_next_state) * (1 - done)
         target_value = reward + self.gamma * next_value
-        value_loss = nn.MSELoss()(critic_value, target_value.detach())
+        value_loss = self.mse_loss(critic_value, target_value.detach())
 
-        # **Actor loss**: The Actor should maximize the expected value predicted by the Critic
+        # --------------------
+        # Actor Loss
+        # --------------------
         action_probs = self.actor(latent_state)
-        log_action_probs = torch.log(action_probs + 1e-6)  # avoid log(0)
-
-        # The Actor wants to maximize Critic's value, so we minimize negative value
+        log_action_probs = torch.log(action_probs + 1e-6)
         actor_loss = -(log_action_probs * critic_value.detach()).mean()
 
-        # 总损失 = VAE损失 + Critic损失 + Actor损失 + 奖励损失
-        total_loss = vae_loss + value_loss + actor_loss + reward_loss
+        # --------------------
+        # Total Loss (except Discriminator)
+        # --------------------
+        total_loss = vae_loss + value_loss + actor_loss + reward_loss + generator_loss
 
-        # 优化模型
+        # Optimize the components except for the discriminator
         self.optimizer.zero_grad()
         total_loss.backward()
         self.optimizer.step()
@@ -318,35 +410,27 @@ class DreamerAgent:
     def run_episode(self):
         states = self.reset()
 
-        done = np.zeros(self.env.num_envs, dtype=bool)  # 每个环境的完成状态
-        total_rewards = np.zeros(self.env.num_envs, dtype=np.float32)  # 每个环境的累积奖励
+        done = np.zeros(self.env.num_envs, dtype=bool)
+        total_rewards = np.zeros(self.env.num_envs, dtype=np.float32)
 
-        while not done.all():  # 所有环境都完成时结束
-            # 检查并转换 LazyFrames 为 PyTorch Tensor
+        while not done.all():
             if isinstance(states, LazyFrames):
                 states = np.array(states)
             states = torch.tensor(states, dtype=torch.float32).to(device)
 
-            # 选择动作
             action_one_hot, action_int = self.select_action(states)
 
-            # 环境交互
             next_states, rewards, terminated, truncated, infos = self.env.step(action_int.cpu().numpy())
-            print(rewards)
-
-            # 终止条件更新：当 terminated 或 truncated 为 True 时认为环境完成
             dones = np.logical_or(terminated, truncated)
 
-            # 训练模型
             next_states = torch.tensor(next_states, dtype=torch.float32).to(device)
             rewards = torch.tensor(rewards, dtype=torch.float32).to(device)
             dones = torch.tensor(dones, dtype=torch.float32).to(device)
 
             self.train(states, action_one_hot, rewards, next_states, dones)
 
-            # 状态更新
             states = next_states
-            total_rewards += rewards.cpu().numpy()  # 更新累积奖励
+            total_rewards += rewards.cpu().numpy()
 
         return total_rewards
 
@@ -378,6 +462,12 @@ if __name__ == "__main__":
         (256, 3, 2, 1),
     ]
 
+    disc_conv_arch = [
+        (64, 3, 2, 1),
+        (128, 3, 2, 1),
+        (256, 3, 2, 1),
+    ]
+
     # 定义Actor和Critic的卷积架构
     actor_conv_arch = [
         (128, 3, 2, 1),
@@ -394,7 +484,7 @@ if __name__ == "__main__":
         (128, 4, 2, 1),
     ]
 
-    agent = DreamerAgent(envs, latent_shape, cnn_net_arch, transition_model_conv_arch, actor_conv_arch, critic_conv_arch)
+    agent = DreamerAgent(envs, latent_shape, cnn_net_arch, transition_model_conv_arch, actor_conv_arch, critic_conv_arch, disc_conv_arch)
 
     for episode in range(1000):
         rewards = agent.run_episode()

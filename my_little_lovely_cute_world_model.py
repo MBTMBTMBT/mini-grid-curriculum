@@ -249,3 +249,102 @@ class WorldModel:
         # Loss functions
         self.adversarial_loss = nn.BCELoss()
         self.mse_loss = nn.MSELoss()
+
+    def train(self, state, action, reward, next_state, done):
+        device = next(self.parameters()).device
+        state = state.to(device)
+        action = action.to(device)
+        reward = reward.to(device)
+        next_state = next_state.to(device)
+        done = done.to(device)
+
+        # Encode the current and next state
+        latent_state = self.encoder(state)
+        latent_next_state = self.encoder(next_state)
+
+        # Predict the next latent state and reward with the transition model
+        predicted_next_state, mean, logvar, predicted_reward = self.transition_model(latent_state, action)
+
+        # Reconstruct the predicted next state
+        reconstructed_state = self.decoder(predicted_next_state)
+
+        # **Resize the next state** to match the size of the reconstructed state
+        resized_next_state = F.interpolate(next_state, size=reconstructed_state.shape[2:], mode='bilinear',
+                                           align_corners=False)
+
+        # --------------------
+        # Discriminator Training
+        # --------------------
+        real_labels = torch.ones(state.size(0), 1).to(device)
+        fake_labels = torch.zeros(state.size(0), 1).to(device)
+
+        # Train discriminator on real and fake images
+        real_outputs = self.discriminator(resized_next_state)
+        fake_outputs = self.discriminator(reconstructed_state.detach())
+
+        d_real_loss = self.adversarial_loss(real_outputs, real_labels)
+        d_fake_loss = self.adversarial_loss(fake_outputs, fake_labels)
+        discriminator_loss = (d_real_loss + d_fake_loss) / 2
+
+        self.discriminator_optimizer.zero_grad()
+        discriminator_loss.backward()
+        self.discriminator_optimizer.step()
+
+        # --------------------
+        # Generator (Decoder) Loss
+        # --------------------
+        # Try to fool the discriminator with the generated image
+        g_fake_outputs = self.discriminator(reconstructed_state)
+        generator_loss = self.adversarial_loss(g_fake_outputs, real_labels)
+
+        # --------------------
+        # VAE Loss (Reconstruction + KL Divergence)
+        # --------------------
+        recon_loss = self.mse_loss(reconstructed_state, resized_next_state)
+        kl_loss = -0.5 * torch.sum(1 + logvar - mean.pow(2) - logvar.exp())
+        vae_loss = recon_loss + kl_loss
+
+        # --------------------
+        # Reward Prediction Loss
+        # --------------------
+        reward_loss = self.mse_loss(predicted_reward.squeeze(), reward)
+
+        # --------------------
+        # Critic Loss (TD error)
+        # --------------------
+        critic_value = self.critic(latent_state)
+        next_value = self.critic(latent_next_state) * (1 - done)
+        target_value = reward + self.gamma * next_value
+        value_loss = self.mse_loss(critic_value, target_value.detach())
+
+        # --------------------
+        # Actor Loss
+        # --------------------
+        action_probs = self.actor(latent_state)
+        log_action_probs = torch.log(action_probs + 1e-6)
+        actor_loss = -(log_action_probs * critic_value.detach()).mean()
+
+        # --------------------
+        # Total Loss (except Discriminator)
+        # --------------------
+        total_loss = vae_loss + value_loss + actor_loss + reward_loss + generator_loss
+
+        # Optimize the components except for the discriminator
+        self.optimizer.zero_grad()
+        total_loss.backward()
+        self.optimizer.step()
+
+        # Return a dictionary with all the loss values
+        loss_dict = {
+            "discriminator_loss": discriminator_loss.detach().cpu().item(),
+            "generator_loss": generator_loss.detach().cpu().item(),
+            "vae_loss": vae_loss.detach().cpu().item(),
+            "reconstruction_loss": recon_loss.detach().cpu().item(),
+            "kl_loss": kl_loss.detach().cpu().item(),
+            "reward_loss": reward_loss.detach().cpu().item(),
+            "critic_loss": value_loss.detach().cpu().item(),
+            "actor_loss": actor_loss.detach().cpu().item(),
+            "total_loss": total_loss.detach().cpu().item(),
+        }
+
+        return loss_dict

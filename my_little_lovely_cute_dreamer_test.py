@@ -92,7 +92,7 @@ class TransitionModelVAE(nn.Module):
 
         # 动作和潜在状态融合的卷积层
         conv_layers = []
-        in_channels = latent_channels  # 只需潜在状态的通道
+        in_channels = latent_channels * 2  # 由于拼接，通道数是原来的2倍
         for out_channels, kernel_size, stride, padding in conv_arch:
             conv_layers.append(nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding))
             conv_layers.append(nn.ReLU())
@@ -111,7 +111,8 @@ class TransitionModelVAE(nn.Module):
         """
         通过给定的卷积架构和输入形状，动态计算展平后的大小
         """
-        sample_tensor = torch.zeros(1, latent_shape[0], latent_shape[1], latent_shape[2])  # 假设 batch_size = 1
+        # 假设 batch_size = 1，创建一个假定输入
+        sample_tensor = torch.zeros(1, latent_shape[0] * 2, latent_shape[1], latent_shape[2])  # 拼接后，通道数翻倍
         sample_tensor = self.conv_encoder(sample_tensor)
         return sample_tensor.numel()
 
@@ -127,8 +128,8 @@ class TransitionModelVAE(nn.Module):
         action_embed = self.action_embed(action)
         action_embed = action_embed.view(batch_size, latent_channels, latent_height, latent_width)
 
-        # 将动作嵌入加到潜在状态上
-        x = latent_state + action_embed  # 将动作嵌入与潜在状态相加
+        # 将动作嵌入与潜在状态拼接，而不是相加
+        x = torch.cat([latent_state, action_embed], dim=1)  # 拼接后通道数翻倍
 
         # 通过卷积编码器处理
         x = self.conv_encoder(x)

@@ -251,8 +251,15 @@ class DreamerAgent:
         target_value = reward + self.gamma * next_value
         value_loss = nn.MSELoss()(critic_value, target_value.detach())
 
-        # 总损失
-        total_loss = vae_loss + value_loss
+        # **Actor loss**: The Actor should maximize the expected value predicted by the Critic
+        action_probs = self.actor(latent_state)
+        log_action_probs = torch.log(action_probs + 1e-6)  # avoid log(0)
+
+        # The Actor wants to maximize Critic's value, so we minimize negative value
+        actor_loss = -(log_action_probs * critic_value.detach()).mean()
+
+        # 总损失 = VAE损失 + Critic损失 + Actor损失
+        total_loss = vae_loss + value_loss + actor_loss
 
         # 优化模型
         self.optimizer.zero_grad()

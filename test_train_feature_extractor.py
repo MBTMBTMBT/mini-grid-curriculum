@@ -1,71 +1,15 @@
 import os
 
-import numpy as np
 import torch
-from stable_baselines3.common.vec_env import SubprocVecEnv
 from torch import nn, optim
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
-from customPPO import CustomPPO, CustomActorCriticPolicy, TransformerEncoderExtractor, CNNEncoderExtractor
+from customPPO import CustomPPO, CustomActorCriticPolicy, CNNEncoderExtractor
 from customize_minigrid.custom_env import CustomEnv
-from customize_minigrid.wrappers import FullyObsSB3MLPWrapper, FullyObsImageWrapper
-from easy_models import SimpleCNN
-from train import TaskConfig
-from gymnasium.vector import AsyncVectorEnv
-
-
-class GymDataset(Dataset):
-    def __init__(self, env_make_func, epoch_size, num_envs=1):
-        self.env_make_func = env_make_func
-        self.epoch_size = epoch_size
-        self.num_envs = num_envs
-        self.data = []
-
-        # Replacing AsyncVectorEnv with SubprocVecEnv
-        self.env = SubprocVecEnv([self.env_make_func for _ in range(num_envs)])
-
-        # Initial sampling to populate the dataset
-        self.resample()
-
-    def resample(self):
-        """Resample the data by interacting with the environment and collecting new data for one epoch."""
-        self.data.clear()  # Clear existing data
-        obs = self.env.reset()  # Reset the environment to get the initial observations
-
-        # Collect data for the entire epoch with a progress bar
-        for _ in tqdm(range(self.epoch_size // self.num_envs), desc="Sampling Data", unit="step"):
-            # Sample actions for each parallel environment
-            actions = [self.env.action_space.sample() for _ in range(self.num_envs)]
-            next_obs, rewards, dones, infos = self.env.step(actions)
-
-            # Copy `next_obs` to avoid modifying the original
-            final_next_obs = np.copy(next_obs)
-
-            # If an environment is done, replace values in `final_next_obs`
-            done_indices = np.where(dones)[0]  # Optimisation: only handle environments where `dones` is True
-            for env_idx in done_indices:
-                final_next_obs[env_idx] = infos[env_idx]["terminal_observation"]
-
-            # Store the data for each parallel environment
-            for env_idx in range(self.num_envs):
-                self.data.append({
-                    'obs': torch.tensor(obs[env_idx], dtype=torch.float32),
-                    'action': torch.tensor(actions[env_idx], dtype=torch.int64),
-                    'next_obs': torch.tensor(final_next_obs[env_idx], dtype=torch.float32),
-                    'reward': torch.tensor(rewards[env_idx], dtype=torch.float32),
-                    'done': torch.tensor(dones[env_idx], dtype=torch.bool)
-                })
-
-            obs = next_obs  # Update `obs` to `next_obs` for the next step
-
-    def __len__(self):
-        return len(self.data)
-
-    def __getitem__(self, idx):
-        item = self.data[idx]
-        return item['obs'], item['action'], item['next_obs'], item['reward'], item['done']
+from customize_minigrid.wrappers import FullyObsImageWrapper
+from gymnasium_dataset import GymDataset
 
 
 def make_env():

@@ -7,12 +7,11 @@ from torch.utils.tensorboard import SummaryWriter
 from callbacks import EvalSaveCallback
 from customPPO import MLPEncoderExtractor, CustomActorCriticPolicy, CustomPPO, \
     CNNEncoderExtractor
-from customize_minigrid.custom_env import CustomEnv
 from stable_baselines3.common.vec_env import DummyVecEnv, VecMonitor, SubprocVecEnv
 from stable_baselines3.common.callbacks import CallbackList
 
 from customize_minigrid.wrappers import FullyObsSB3MLPWrapper, FullyObsImageWrapper
-from task_config import TaskConfig
+from task_config import TaskConfig, make_env
 
 
 class Trainer:
@@ -64,31 +63,6 @@ class Trainer:
             iter_threshold: float = 1e-5,
             max_iter: int = 1e5,
     ):
-        # Helper function to create a new environment instance for training, evaluation, or target
-        def make_env(env_config):
-            """
-            Create a new environment instance based on the configuration and environment type.
-
-            :param env_config: Configuration object for the environment
-            :param env_type: A string indicating the type of environment: "train", "eval", or "target"
-            :return: A new environment instance
-            """
-            return self.output_wrapper(
-                CustomEnv(
-                    txt_file_path=env_config.txt_file_path,
-                    rand_gen_shape=env_config.rand_gen_shape,
-                    display_size=self.max_minimum_display_size,
-                    display_mode=env_config.display_mode,
-                    random_rotate=env_config.random_rotate,
-                    random_flip=env_config.random_flip,
-                    custom_mission=env_config.custom_mission,
-                    max_steps=env_config.max_steps,
-                    agent_start_pos=env_config.start_pos,
-                    agent_start_dir=env_config.start_dir,
-                    add_random_door_key=env_config.add_random_door_key,
-                )
-            )
-
         # Prepare environments
         train_env_list = []
         train_env_step_list = []
@@ -99,7 +73,7 @@ class Trainer:
 
         for each_task_config in self.eval_configs:
             # Store evaluation environments and names
-            eval_env_list.append(VecMonitor(DummyVecEnv([lambda: make_env(each_task_config)])))
+            eval_env_list.append(VecMonitor(DummyVecEnv([lambda: make_env(each_task_config, self.output_wrapper, self.max_minimum_display_size)])))
             eval_env_name_list.append(each_task_config.name)
 
         for difficulty_level in sorted(self.train_task_dict.keys()):
@@ -118,7 +92,7 @@ class Trainer:
             # Create VecMonitor for the combined training environments
             vec_train_env = VecMonitor(
                 SubprocVecEnv(
-                    [lambda: make_env(each_task_config) for each_task_config in train_tasks]))
+                    [lambda: make_env(each_task_config, self.output_wrapper, self.max_minimum_display_size) for each_task_config in train_tasks]))
 
             train_env_list.append(vec_train_env)
             train_env_step_list.append(vec_train_steps)

@@ -75,42 +75,77 @@ class Decoder(nn.Module):
 
 
 class TransitionModelVAE(nn.Module):
-    def __init__(self, latent_shape, action_dim):
+    def __init__(self, latent_shape, action_dim, conv_arch):
+        """
+        :param latent_shape: 潜在空间的形状 (channels, height, width)
+        :param action_dim: 动作的维度
+        :param conv_arch: 卷积网络的架构，例如 [(64, 4, 2, 1), (128, 4, 2, 1)]
+        """
         super(TransitionModelVAE, self).__init__()
         latent_channels, latent_height, latent_width = latent_shape
-        latent_dim = latent_channels * latent_height * latent_width
 
-        self.fc_mean = nn.Sequential(
-            nn.Linear(latent_dim + action_dim, 256),
-            nn.ReLU(),
-            nn.Linear(256, latent_dim)  # 保持latent_dim，不改变大小
+        # 动作嵌入：将动作映射为与潜在状态同样大小的向量
+        self.action_embed = nn.Sequential(
+            nn.Linear(action_dim, latent_channels * latent_height * latent_width),
+            nn.ReLU()
         )
-        self.fc_logvar = nn.Sequential(
-            nn.Linear(latent_dim + action_dim, 256),
-            nn.ReLU(),
-            nn.Linear(256, latent_dim)  # 保持latent_dim，不改变大小
-        )
+
+        # 动作和潜在状态融合的卷积层
+        conv_layers = []
+        in_channels = latent_channels  # 只需潜在状态的通道
+        for out_channels, kernel_size, stride, padding in conv_arch:
+            conv_layers.append(nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding))
+            conv_layers.append(nn.ReLU())
+            in_channels = out_channels
+
+        self.conv_encoder = nn.Sequential(*conv_layers)
+
+        # 动态计算展平后的大小
+        self.flattened_size = self._get_flattened_size(latent_shape, conv_arch)
+
+        # Flatten后生成均值和logvar
+        self.fc_mean = nn.Linear(self.flattened_size, latent_channels * latent_height * latent_width)
+        self.fc_logvar = nn.Linear(self.flattened_size, latent_channels * latent_height * latent_width)
+
+    def _get_flattened_size(self, latent_shape, conv_arch):
+        """
+        通过给定的卷积架构和输入形状，动态计算展平后的大小
+        """
+        sample_tensor = torch.zeros(1, latent_shape[0], latent_shape[1], latent_shape[2])  # 假设 batch_size = 1
+        sample_tensor = self.conv_encoder(sample_tensor)
+        return sample_tensor.numel()
 
     def forward(self, latent_state, action):
-        # 将输入展平为(batch_size, latent_dim)
-        batch_size = latent_state.size(0)
-        latent_channels, latent_height, latent_width = latent_state.shape[1], latent_state.shape[2], latent_state.shape[3]
-        latent_dim = latent_channels * latent_height * latent_width
+        """
+        :param latent_state: (batch_size, latent_channels, latent_height, latent_width)
+        :param action: (batch_size, action_dim)
+        :return: z_next: 下一个潜在状态, mean: 均值, logvar: 方差的对数
+        """
+        batch_size, latent_channels, latent_height, latent_width = latent_state.shape
 
-        # Flatten latent_state
-        latent_state_flat = latent_state.view(batch_size, -1)
+        # 嵌入动作，并将其形状调整为与潜在状态匹配
+        action_embed = self.action_embed(action)
+        action_embed = action_embed.view(batch_size, latent_channels, latent_height, latent_width)
 
-        # Concatenate action to the flattened latent state
-        x = torch.cat([latent_state_flat, action], dim=-1)
+        # 将动作嵌入加到潜在状态上
+        x = latent_state + action_embed  # 将动作嵌入与潜在状态相加
 
-        # Compute mean and logvar for VAE sampling
-        mean = self.fc_mean(x)
-        logvar = self.fc_logvar(x)
+        # 通过卷积编码器处理
+        x = self.conv_encoder(x)
+
+        # Flatten 以进行全连接层处理
+        x_flat = x.view(batch_size, -1)
+
+        # 生成均值和logvar
+        mean = self.fc_mean(x_flat)
+        logvar = self.fc_logvar(x_flat)
+
+        # 重参数化技巧
         std = torch.exp(0.5 * logvar)
         eps = torch.randn_like(std)
-        z_next = mean + eps * std  # 重参数化技巧
+        z_next = mean + eps * std
 
-        # 将输出恢复为 (batch_size, latent_channels, latent_height, latent_width)
+        # 将 z_next 恢复为 (batch_size, latent_channels, latent_height, latent_width)
         z_next_reshaped = z_next.view(batch_size, latent_channels, latent_height, latent_width)
 
         return z_next_reshaped, mean, logvar
@@ -197,11 +232,11 @@ class Critic(nn.Module):
 
 # DreamerAgent: 包含Encoder, Decoder, TransitionModel, Actor, Critic
 class DreamerAgent:
-    def __init__(self, env, latent_shape, cnn_net_arch, actor_conv_arch, critic_conv_arch, gamma=0.99):
+    def __init__(self, env, latent_shape, cnn_net_arch, transition_model_conv_arch, actor_conv_arch, critic_conv_arch, gamma=0.99):
         self.env = env
         self.encoder = Encoder(env.single_observation_space.shape, latent_shape, cnn_net_arch).to(device)
         self.decoder = Decoder(latent_shape, env.single_observation_space.shape, cnn_net_arch).to(device)
-        self.transition_model = TransitionModelVAE(latent_shape, env.single_action_space.n).to(device)
+        self.transition_model = TransitionModelVAE(latent_shape, env.single_action_space.n, transition_model_conv_arch).to(device)
         self.actor = Actor(latent_shape, env.single_action_space.n, actor_conv_arch).to(device)
         self.critic = Critic(latent_shape, critic_conv_arch).to(device)
         self.gamma = gamma
@@ -340,7 +375,12 @@ if __name__ == "__main__":
         (256, 3, 2, 1),
     ]
 
-    agent = DreamerAgent(envs, latent_shape, cnn_net_arch, actor_conv_arch, critic_conv_arch)
+    transition_model_conv_arch = [
+        (64, 4, 2, 1),
+        (128, 4, 2, 1),
+    ]
+
+    agent = DreamerAgent(envs, latent_shape, cnn_net_arch, transition_model_conv_arch, actor_conv_arch, critic_conv_arch)
 
     for episode in range(1000):
         rewards = agent.run_episode()

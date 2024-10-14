@@ -4,6 +4,7 @@ import torch.nn as nn
 import torch.optim as optim
 import gymnasium as gym
 from gymnasium.wrappers import FrameStack, AtariPreprocessing, LazyFrames
+from gymnasium.vector import AsyncVectorEnv
 import torch.nn.functional as F
 import torchvision.transforms as T
 
@@ -82,24 +83,37 @@ class TransitionModelVAE(nn.Module):
         self.fc_mean = nn.Sequential(
             nn.Linear(latent_dim + action_dim, 256),
             nn.ReLU(),
-            nn.Linear(256, latent_dim)
+            nn.Linear(256, latent_dim)  # 保持latent_dim，不改变大小
         )
         self.fc_logvar = nn.Sequential(
             nn.Linear(latent_dim + action_dim, 256),
             nn.ReLU(),
-            nn.Linear(256, latent_dim)
+            nn.Linear(256, latent_dim)  # 保持latent_dim，不改变大小
         )
 
     def forward(self, latent_state, action):
-        if len(latent_state.shape) == 4:  # (batch_size, channels, height, width)
-            latent_state = latent_state.view(latent_state.size(0), -1)  # 展平成向量
-        x = torch.cat([latent_state, action], dim=-1)
+        # 将输入展平为(batch_size, latent_dim)
+        batch_size = latent_state.size(0)
+        latent_channels, latent_height, latent_width = latent_state.shape[1], latent_state.shape[2], latent_state.shape[3]
+        latent_dim = latent_channels * latent_height * latent_width
+
+        # Flatten latent_state
+        latent_state_flat = latent_state.view(batch_size, -1)
+
+        # Concatenate action to the flattened latent state
+        x = torch.cat([latent_state_flat, action], dim=-1)
+
+        # Compute mean and logvar for VAE sampling
         mean = self.fc_mean(x)
         logvar = self.fc_logvar(x)
         std = torch.exp(0.5 * logvar)
         eps = torch.randn_like(std)
-        z_next = mean + eps * std
-        return z_next.view_as(latent_state), mean, logvar
+        z_next = mean + eps * std  # 重参数化技巧
+
+        # 将输出恢复为 (batch_size, latent_channels, latent_height, latent_width)
+        z_next_reshaped = z_next.view(batch_size, latent_channels, latent_height, latent_width)
+
+        return z_next_reshaped, mean, logvar
 
 
 class Actor(nn.Module):
@@ -185,10 +199,10 @@ class Critic(nn.Module):
 class DreamerAgent:
     def __init__(self, env, latent_shape, cnn_net_arch, actor_conv_arch, critic_conv_arch, gamma=0.99):
         self.env = env
-        self.encoder = Encoder(env.observation_space.shape, latent_shape, cnn_net_arch).to(device)
-        self.decoder = Decoder(latent_shape, env.observation_space.shape, cnn_net_arch).to(device)
-        self.transition_model = TransitionModelVAE(latent_shape, env.action_space.n).to(device)
-        self.actor = Actor(latent_shape, env.action_space.n, actor_conv_arch).to(device)
+        self.encoder = Encoder(env.single_observation_space.shape, latent_shape, cnn_net_arch).to(device)
+        self.decoder = Decoder(latent_shape, env.single_observation_space.shape, cnn_net_arch).to(device)
+        self.transition_model = TransitionModelVAE(latent_shape, env.single_action_space.n).to(device)
+        self.actor = Actor(latent_shape, env.single_action_space.n, actor_conv_arch).to(device)
         self.critic = Critic(latent_shape, critic_conv_arch).to(device)
         self.gamma = gamma
         self.optimizer = optim.Adam(list(self.encoder.parameters()) +
@@ -198,37 +212,42 @@ class DreamerAgent:
                                     list(self.critic.parameters()), lr=1e-4)
 
     def reset(self):
-        return self.env.reset()
+        obs, _ = self.env.reset()  # 在 gymnasium 中 reset 返回 (obs, info)
+        return obs
 
     def select_action(self, state):
         with torch.no_grad():
             latent_state = self.encoder(state)
             action_probs = self.actor(latent_state)
-            # 对每个批次样本选择动作
             action = torch.multinomial(action_probs, 1).squeeze(1)  # (batch_size,)
 
             # 将动作转换为one-hot编码
-            action_one_hot = F.one_hot(action, num_classes=self.env.action_space.n).float()  # (batch_size, action_dim)
-            return action_one_hot
+            action_one_hot = F.one_hot(action, num_classes=self.env.single_action_space.n).float()  # (batch_size, action_dim)
+            return action_one_hot, action
 
     def train(self, state, action, reward, next_state, done):
-        state = self.encoder(state)
-        next_state = self.encoder(next_state)
+        # 编码当前状态和下一个真实状态
+        latent_state = self.encoder(state)
+        latent_next_state = self.encoder(next_state)  # 保持next_state为编码后的真实下一个状态
 
         # 使用Transition Model预测下一个潜在状态
-        predicted_state, mean, logvar = self.transition_model(state, torch.tensor(action).unsqueeze(0).to(device))
+        predicted_next_state, mean, logvar = self.transition_model(latent_state, action)
 
-        # 通过Decoder重建图像观测
-        reconstructed_state = self.decoder(predicted_state)
+        # 通过Decoder重建预测的图像观测
+        reconstructed_state = self.decoder(predicted_next_state)
+
+        # 将next_state调整到与重构图像相同的大小
+        resized_next_state = F.interpolate(next_state, size=reconstructed_state.shape[2:], mode='bilinear',
+                                           align_corners=False)
 
         # 计算VAE损失：重构损失和KL散度
-        recon_loss = nn.MSELoss()(reconstructed_state, next_state)
+        recon_loss = nn.MSELoss()(reconstructed_state, resized_next_state)  # 使用调整后的next_state作为目标
         kl_loss = -0.5 * torch.sum(1 + logvar - mean.pow(2) - logvar.exp())
         vae_loss = recon_loss + kl_loss
 
         # Critic损失：TD误差
-        critic_value = self.critic(state)
-        next_value = self.critic(next_state) * (1 - done)
+        critic_value = self.critic(latent_state)
+        next_value = self.critic(latent_next_state) * (1 - done)
         target_value = reward + self.gamma * next_value
         value_loss = nn.MSELoss()(critic_value, target_value.detach())
 
@@ -241,49 +260,59 @@ class DreamerAgent:
         self.optimizer.step()
 
     def run_episode(self):
-        state, _ = self.reset()  # 在gymnasium中reset返回(state, info)
+        states = self.reset()
 
-        # 检查并转换LazyFrames为 PyTorch Tensor
-        if isinstance(state, LazyFrames):
-            state = np.array(state)  # 转换为 NumPy 数组
-            state = torch.tensor(state, dtype=torch.float32).to(device)  # 转换为 PyTorch Tensor，并移动到设备上
+        done = np.zeros(self.env.num_envs, dtype=bool)  # 每个环境的完成状态
+        total_rewards = np.zeros(self.env.num_envs, dtype=np.float32)  # 每个环境的累积奖励
 
-        done = False
-        total_reward = 0
-        while not done:
+        while not done.all():  # 所有环境都完成时结束
+            # 检查并转换 LazyFrames 为 PyTorch Tensor
+            if isinstance(states, LazyFrames):
+                states = np.array(states)
+            states = torch.tensor(states, dtype=torch.float32).to(device)
+
             # 选择动作
-            action = self.select_action(state)
+            action_one_hot, action_int = self.select_action(states)
 
             # 环境交互
-            next_state, reward, done, _, _ = self.env.step(action)
+            next_states, rewards, terminated, truncated, infos = self.env.step(action_int.cpu().numpy())
+            print(rewards)
 
-            # 检查并转换LazyFrames为 PyTorch Tensor
-            if isinstance(next_state, LazyFrames):
-                next_state = np.array(next_state)  # 转换为 NumPy 数组
-                next_state = torch.tensor(next_state, dtype=torch.float32).to(device)  # 转换为 PyTorch Tensor，并移动到设备上
+            # 终止条件更新：当 terminated 或 truncated 为 True 时认为环境完成
+            dones = np.logical_or(terminated, truncated)
 
             # 训练模型
-            self.train(state, action, reward, next_state, done)
+            next_states = torch.tensor(next_states, dtype=torch.float32).to(device)
+            rewards = torch.tensor(rewards, dtype=torch.float32).to(device)
+            dones = torch.tensor(dones, dtype=torch.float32).to(device)
+
+            self.train(states, action_one_hot, rewards, next_states, dones)
 
             # 状态更新
-            state = next_state
-            total_reward += reward
+            states = next_states
+            total_rewards += rewards.cpu().numpy()  # 更新累积奖励
 
-        return total_reward
+        return total_rewards
 
 
-# 使用Atari环境作为示例（Pong-v4）
+# Vectorized environment creator
+def create_env(env_name):
+    def make_env():
+        env = gym.make(env_name)
+        env = AtariPreprocessing(env, scale_obs=True)  # 归一化为[0, 1]
+        env = FrameStack(env, num_stack=4)  # 堆叠4帧
+        return env
+    return make_env
+
+
+# 主函数：创建向量化环境和训练
 if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    # 创建 Atari Pong 环境，并添加预处理和 FrameStack
-    env = gym.make('PongNoFrameskip-v4')
-
-    # Atari 预处理：灰度化、下采样、动作重复等
-    env = AtariPreprocessing(env, scale_obs=True)  # 将观测归一化为[0, 1]
-
-    # 堆叠4帧，构成时序观测
-    env = FrameStack(env, num_stack=4)
+    # 定义向量化环境：并行运行多个Pong环境
+    num_envs = 1  # 并行环境的数量
+    env_name = 'PongNoFrameskip-v4'
+    envs = AsyncVectorEnv([create_env(env_name) for _ in range(num_envs)])
 
     # 定义潜在表示形状和卷积网络架构
     latent_shape = (16, 8, 8)  # 潜在空间为16通道的8x8图像
@@ -304,8 +333,8 @@ if __name__ == "__main__":
         (256, 3, 2, 1),
     ]
 
-    agent = DreamerAgent(env, latent_shape, cnn_net_arch, actor_conv_arch, critic_conv_arch)
+    agent = DreamerAgent(envs, latent_shape, cnn_net_arch, actor_conv_arch, critic_conv_arch)
 
     for episode in range(1000):
-        reward = agent.run_episode()
-        print(f"Episode {episode}, Reward: {reward}")
+        rewards = agent.run_episode()
+        print(f"Episode {episode}, Rewards: {rewards}")

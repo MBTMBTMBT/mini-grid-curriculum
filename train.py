@@ -189,11 +189,11 @@ class Trainer:
                 model = CustomPPO(
                     CustomActorCriticPolicy,
                     env=env,
-                    n_steps=16384,
-                    batch_size=32,
-                    n_epochs=10,
-                    clip_range=0.4,
-                    clip_range_vf=None,
+                    # n_steps=8192,
+                    # batch_size=32,
+                    # n_epochs=10,
+                    # clip_range=0.4,
+                    # clip_range_vf=None,
                     policy_kwargs=self.policy_kwargs,
                     verbose=1,
                     log_dir=log_dir,
@@ -264,7 +264,7 @@ if __name__ == '__main__':
     # num_parallel: int = 8
 
     ##################################################################
-    for i in range(1, 7):
+    for i in range(1, 2):
         config = TaskConfig()
         config.name = f"7-{i}"
         config.rand_gen_shape = None
@@ -341,8 +341,8 @@ if __name__ == '__main__':
         )
         runner.train(
             session_dir=f"./experiments/mazes-bin-32/run{i}",
-            eval_freq=int(2.5e4),
-            compute_info_freq=int(2.5e4),
+            eval_freq=int(50e4),
+            compute_info_freq=int(50e4),
             num_eval_episodes=50,
             eval_deterministic=False,
             start_time_step=0,

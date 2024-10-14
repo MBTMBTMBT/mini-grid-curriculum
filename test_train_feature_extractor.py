@@ -1,5 +1,8 @@
 import os
+
+import numpy as np
 import torch
+from stable_baselines3.common.vec_env import SubprocVecEnv
 from torch import nn, optim
 from torch.utils.data import Dataset, DataLoader
 from torch.utils.tensorboard import SummaryWriter
@@ -18,33 +21,32 @@ class GymDataset(Dataset):
         self.env_make_func = env_make_func
         self.epoch_size = epoch_size
         self.num_envs = num_envs
-        self.data = [{}]
+        self.data = []
 
-        # Create the vectorized environment with monitoring
-        self.env = AsyncVectorEnv([self.env_make_func for _ in range(num_envs)])
+        # Replacing AsyncVectorEnv with SubprocVecEnv
+        self.env = SubprocVecEnv([self.env_make_func for _ in range(num_envs)])
 
         # Initial sampling to populate the dataset
         self.resample()
 
     def resample(self):
-        """Resample the data by interacting with the environment and collecting a new epoch of data."""
+        """Resample the data by interacting with the environment and collecting new data for one epoch."""
         self.data.clear()  # Clear existing data
-        obs, infos = self.env.reset()  # Reset the environment to get the initial observations
+        obs = self.env.reset()  # Reset the environment to get the initial observations
 
-        # Collect data for one full epoch with a progress bar
+        # Collect data for the entire epoch with a progress bar
         for _ in tqdm(range(self.epoch_size // self.num_envs), desc="Sampling Data", unit="step"):
             # Sample actions for each parallel environment
             actions = [self.env.action_space.sample() for _ in range(self.num_envs)]
-            next_obs, rewards, dones, truncated, infos = self.env.step(actions)
+            next_obs, rewards, dones, infos = self.env.step(actions)
 
-            # Create a variable to handle the correct 'next_obs'
-            final_next_obs = next_obs.copy()  # Copy `next_obs` to avoid modifying the original
+            # Copy `next_obs` to avoid modifying the original
+            final_next_obs = np.copy(next_obs)
 
-            # Replace values in `final_next_obs` with `final_observation` if done
-            if "final_observation" in infos:
-                for env_idx in range(self.num_envs):
-                    if dones[env_idx]:
-                        final_next_obs[env_idx] = infos["final_observation"][env_idx]
+            # If an environment is done, replace values in `final_next_obs`
+            done_indices = np.where(dones)[0]  # Optimisation: only handle environments where `dones` is True
+            for env_idx in done_indices:
+                final_next_obs[env_idx] = infos[env_idx]["terminal_observation"]
 
             # Store the data for each parallel environment
             for env_idx in range(self.num_envs):
@@ -76,7 +78,7 @@ def make_env():
             random_rotate=True,
             random_flip=True,
             custom_mission="Explore and interact with objects.",
-            max_steps=128,
+            max_steps=1024,
         )
     )
 
@@ -88,14 +90,16 @@ if __name__ == '__main__':
         features_extractor_kwargs=dict(
             net_arch=[32],  # Custom layer sizes
             cnn_net_arch=[
-                (32, 3, 2, 1),
-                (32, 3, 2, 1),
+                (64, 3, 2, 1),
+                (128, 3, 2, 1),
+                (256, 3, 2, 1),
+                (512, 3, 2, 1),
+                (1024, 3, 2, 1),
             ],
             activation_fn=nn.LeakyReLU,  # Activation function
-            encoder_only=False,
-            weights={'total': 1.0, 'inv': 0.0, 'dis': 1.0, 'neighbour': 0.0, 'dec': 0.0, 'rwd': 0.0, 'terminate': 1.0},
+            encoder_only=True,
         ),
-        net_arch=dict(pi=[32, 128, 128], vf=[32, 128, 128]),  # Policy and value network architecture
+        net_arch=dict(pi=[32, 32], vf=[32, 32]),  # Policy and value network architecture
         activation_fn=nn.LeakyReLU,
     )
     os.makedirs(session_dir, exist_ok=True)
@@ -112,7 +116,7 @@ if __name__ == '__main__':
     feature_model = feature_model.cuda()
 
     # Create the dataset using the provided `make_env` function
-    dataset = GymDataset(make_env, int(1e4), num_envs=1)
+    dataset = GymDataset(make_env, int(1e4), num_envs=8)
     dataloader = DataLoader(dataset, batch_size=4, shuffle=True)
 
     optimizer = optim.Adam(feature_model.parameters(), lr=5e-4)

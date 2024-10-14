@@ -1,10 +1,12 @@
+from typing import Tuple, List
+
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
 import gymnasium as gym
 from gymnasium.wrappers import FrameStack, AtariPreprocessing, LazyFrames
-from gymnasium.vector import AsyncVectorEnv
+from gymnasium.vector import AsyncVectorEnv, VectorEnv
 import torch.nn.functional as F
 import torchvision.transforms as T
 
@@ -208,3 +210,40 @@ class TransitionModelVAE(nn.Module):
         z_next_reshaped = z_next.view(batch_size, latent_channels, latent_height, latent_width)
 
         return z_next_reshaped, mean, logvar, reward_pred
+
+
+class WorldModel:
+    def __init__(
+            self,
+            latent_shape: Tuple[int, int, int],
+            num_homomorphism_channels: int,
+            cnn_net_arch: List[Tuple[int, int, int, int]],
+            transition_model_conv_arch: List[Tuple[int, int, int, int]],
+            disc_conv_arch: List[Tuple[int, int, int, int]],
+            lr: float = 1e-4,
+            discriminator_lr: float = 1e-4,
+    ):
+        self.latent_shape = latent_shape
+        self.homomorphism_latent_space = (num_homomorphism_channels, latent_shape[1], latent_shape[2])
+        self.encoder = Encoder(env.single_observation_space.shape, latent_shape, cnn_net_arch)
+        self.decoder = Decoder(latent_shape, env.single_observation_space.shape, cnn_net_arch)
+        self.transition_model = TransitionModelVAE(latent_shape, env.single_action_space.n, transition_model_conv_arch)
+        self.discriminator = Discriminator(env.single_observation_space.shape, disc_conv_arch)
+
+        # Optimizer for all components except the discriminator
+        self.optimizer = optim.Adam(
+            list(self.encoder.parameters()) +
+            list(self.decoder.parameters()) +
+            list(self.transition_model.parameters()),
+            lr=lr,
+        )
+
+        # Separate optimizer for the discriminator
+        self.discriminator_optimizer = optim.Adam(
+            self.discriminator.parameters(),
+            lr=discriminator_lr
+        )
+
+        # Loss functions
+        self.adversarial_loss = nn.BCELoss()
+        self.mse_loss = nn.MSELoss()

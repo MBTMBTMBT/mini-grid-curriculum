@@ -217,6 +217,8 @@ class WorldModel:
             self,
             latent_shape: Tuple[int, int, int],
             num_homomorphism_channels: int,
+            obs_shape: Tuple[int, int, int],
+            num_actions: int,
             cnn_net_arch: List[Tuple[int, int, int, int]],
             transition_model_conv_arch: List[Tuple[int, int, int, int]],
             disc_conv_arch: List[Tuple[int, int, int, int]],
@@ -225,10 +227,10 @@ class WorldModel:
     ):
         self.latent_shape = latent_shape
         self.homomorphism_latent_space = (num_homomorphism_channels, latent_shape[1], latent_shape[2])
-        self.encoder = Encoder(env.single_observation_space.shape, latent_shape, cnn_net_arch)
-        self.decoder = Decoder(latent_shape, env.single_observation_space.shape, cnn_net_arch)
-        self.transition_model = TransitionModelVAE(latent_shape, env.single_action_space.n, transition_model_conv_arch)
-        self.discriminator = Discriminator(env.single_observation_space.shape, disc_conv_arch)
+        self.encoder = Encoder(obs_shape, latent_shape, cnn_net_arch)
+        self.decoder = Decoder(latent_shape, obs_shape, cnn_net_arch)
+        self.transition_model = TransitionModelVAE(latent_shape, num_actions, transition_model_conv_arch)
+        self.discriminator = Discriminator(obs_shape, disc_conv_arch)
 
         # Optimizer for all components except the discriminator
         self.optimizer = optim.Adam(

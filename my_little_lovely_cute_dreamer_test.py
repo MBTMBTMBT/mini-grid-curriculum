@@ -107,6 +107,13 @@ class TransitionModelVAE(nn.Module):
         self.fc_mean = nn.Linear(self.flattened_size, latent_channels * latent_height * latent_width)
         self.fc_logvar = nn.Linear(self.flattened_size, latent_channels * latent_height * latent_width)
 
+        # 新增：奖励预测器
+        self.reward_predictor = nn.Sequential(
+            nn.Linear(self.flattened_size, 256),
+            nn.ReLU(),
+            nn.Linear(256, 1)  # 预测奖励，输出标量
+        )
+
     def _get_flattened_size(self, latent_shape, conv_arch):
         """
         通过给定的卷积架构和输入形状，动态计算展平后的大小
@@ -120,7 +127,7 @@ class TransitionModelVAE(nn.Module):
         """
         :param latent_state: (batch_size, latent_channels, latent_height, latent_width)
         :param action: (batch_size, action_dim)
-        :return: z_next: 下一个潜在状态, mean: 均值, logvar: 方差的对数
+        :return: z_next: 下一个潜在状态, mean: 均值, logvar: 方差的对数, reward_pred: 预测奖励
         """
         batch_size, latent_channels, latent_height, latent_width = latent_state.shape
 
@@ -146,10 +153,13 @@ class TransitionModelVAE(nn.Module):
         eps = torch.randn_like(std)
         z_next = mean + eps * std
 
+        # 奖励预测
+        reward_pred = self.reward_predictor(x_flat)
+
         # 将 z_next 恢复为 (batch_size, latent_channels, latent_height, latent_width)
         z_next_reshaped = z_next.view(batch_size, latent_channels, latent_height, latent_width)
 
-        return z_next_reshaped, mean, logvar
+        return z_next_reshaped, mean, logvar, reward_pred
 
 
 class Actor(nn.Module):
@@ -266,8 +276,8 @@ class DreamerAgent:
         latent_state = self.encoder(state)
         latent_next_state = self.encoder(next_state)  # 保持next_state为编码后的真实下一个状态
 
-        # 使用Transition Model预测下一个潜在状态
-        predicted_next_state, mean, logvar = self.transition_model(latent_state, action)
+        # 使用Transition Model预测下一个潜在状态和奖励
+        predicted_next_state, mean, logvar, predicted_reward = self.transition_model(latent_state, action)
 
         # 通过Decoder重建预测的图像观测
         reconstructed_state = self.decoder(predicted_next_state)
@@ -280,6 +290,9 @@ class DreamerAgent:
         recon_loss = nn.MSELoss()(reconstructed_state, resized_next_state)  # 使用调整后的next_state作为目标
         kl_loss = -0.5 * torch.sum(1 + logvar - mean.pow(2) - logvar.exp())
         vae_loss = recon_loss + kl_loss
+
+        # 奖励损失：使用MSELoss衡量预测奖励与真实奖励之间的误差
+        reward_loss = nn.MSELoss()(predicted_reward.squeeze(), reward)
 
         # Critic损失：TD误差
         critic_value = self.critic(latent_state)
@@ -294,8 +307,8 @@ class DreamerAgent:
         # The Actor wants to maximize Critic's value, so we minimize negative value
         actor_loss = -(log_action_probs * critic_value.detach()).mean()
 
-        # 总损失 = VAE损失 + Critic损失 + Actor损失
-        total_loss = vae_loss + value_loss + actor_loss
+        # 总损失 = VAE损失 + Critic损失 + Actor损失 + 奖励损失
+        total_loss = vae_loss + value_loss + actor_loss + reward_loss
 
         # 优化模型
         self.optimizer.zero_grad()

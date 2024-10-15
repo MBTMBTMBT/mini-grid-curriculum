@@ -52,6 +52,7 @@ class Encoder(nn.Module):
         # Calculate the input image size
         target_input_size = calculate_input_size(min(latent_height, latent_width), cnn_net_arch)
         self.resize = T.Resize((target_input_size, target_input_size), antialias=True)
+        print(f"The input observations will be resized into {target_input_size} * {target_input_size} for encoding.")
 
         conv_layers = []
         in_channels = channels
@@ -546,23 +547,28 @@ if __name__ == '__main__':
     lr = 1e-4
     discriminator_lr=5e-5
 
-    latent_shape = (16, 16, 16)  # channel, height, width
+    latent_shape = (16, 24, 24)  # channel, height, width
+    num_homomorphism_channels = 12
+
     encoder_decoder_net_arch = [
         (64, 3, 2, 1),
         (128, 3, 2, 1),
         (256, 3, 2, 1),
+        (512, 3, 1, 1),
     ]
 
     disc_conv_arch = [
         (64, 3, 2, 1),
         (128, 3, 2, 1),
         (256, 3, 2, 1),
+        (512, 3, 1, 1),
     ]
 
     transition_model_conv_arch = [
         (64, 4, 2, 1),
         (128, 4, 2, 1),
         (256, 4, 2, 1),
+        (512, 4, 1, 1),
     ]
 
     configs = []
@@ -604,7 +610,7 @@ if __name__ == '__main__':
 
     world_model = WorldModel(
         latent_shape=latent_shape,
-        num_homomorphism_channels=8,
+        num_homomorphism_channels=num_homomorphism_channels,
         obs_shape=venv.observation_space.shape,
         num_actions=venv.action_space.n,
         cnn_net_arch=encoder_decoder_net_arch,

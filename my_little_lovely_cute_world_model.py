@@ -166,11 +166,19 @@ class TransitionModelVAE(nn.Module):
         self.fc_mean = nn.Linear(self.flattened_size, latent_channels * latent_height * latent_width)
         self.fc_logvar = nn.Linear(self.flattened_size, latent_channels * latent_height * latent_width)
 
-        # Added: Reward predictor
+        # Reward predictor
         self.reward_predictor = nn.Sequential(
             nn.Linear(self.flattened_size, 256),
             nn.ReLU(),
             nn.Linear(256, 1)  # Predict reward, output a scalar
+        )
+
+        # Done predictor
+        self.done_predictor = nn.Sequential(
+            nn.Linear(self.flattened_size, 256),
+            nn.ReLU(),
+            nn.Linear(256, 1),
+            nn.Sigmoid()
         )
 
     def _get_flattened_size(self, latent_shape, conv_arch):
@@ -215,10 +223,13 @@ class TransitionModelVAE(nn.Module):
         # Predict reward
         reward_pred = self.reward_predictor(x_flat)
 
+        # Predict done
+        done_pred = self.done_predictor(x_flat)
+
         # Reshape z_next to (batch_size, latent_channels, latent_height, latent_width)
         z_next_reshaped = z_next.view(batch_size, latent_channels, latent_height, latent_width)
 
-        return z_next_reshaped, mean, logvar, reward_pred
+        return z_next_reshaped, mean, logvar, reward_pred, done_pred
 
 
 class WorldModel(nn.Module):
@@ -315,7 +326,8 @@ class WorldModel(nn.Module):
 
         # Predict the next latent state and reward with the transition model
         action = F.one_hot(action, self.num_actions).type(torch.float)
-        predicted_next_homo_latent_state, mean, logvar, predicted_reward = self.transition_model(homo_latent_state, action)
+        predicted_next_homo_latent_state, mean, logvar, predicted_reward, predicted_done \
+            = self.transition_model(homo_latent_state, action)
 
         # Make homomorphism next state
         predicted_next_state = torch.cat([predicted_next_homo_latent_state, latent_next_state[:, self.num_homomorphism_channels:, :, :]], dim=1)
@@ -365,9 +377,14 @@ class WorldModel(nn.Module):
         reward_loss = self.mse_loss(predicted_reward.squeeze(), reward)
 
         # --------------------
+        # Done Prediction Loss
+        # --------------------
+        done_loss = F.binary_cross_entropy(predicted_done.squeeze(), done.float())  # Convert done to float
+
+        # --------------------
         # Total Loss (except Discriminator)
         # --------------------
-        total_loss = vae_loss + reward_loss + generator_loss
+        total_loss = vae_loss + reward_loss + generator_loss + done_loss
 
         # Optimize the components except for the discriminator
         self.optimizer.zero_grad()
@@ -382,12 +399,13 @@ class WorldModel(nn.Module):
             "reconstruction_loss": recon_loss.detach().cpu().item(),
             "kl_loss": kl_loss.detach().cpu().item(),
             "reward_loss": reward_loss.detach().cpu().item(),
+            "done_loss": done_loss.detach().cpu().item(),
             "total_loss": total_loss.detach().cpu().item(),
         }
 
         return loss_dict
 
-    def train_epoch(self, dataloader: DataLoader, log_writer: SummaryWriter, start_num_samples=0):
+    def train_epoch(self, dataloader: DataLoader, log_writer: SummaryWriter, start_num_batches=0):
         total_samples = len(dataloader) * dataloader.batch_size
         total_loss = 0.0
         with tqdm(total=total_samples, desc="Training", unit="sample") as pbar:
@@ -400,16 +418,16 @@ class WorldModel(nn.Module):
                 pbar.update(len(obs))
                 pbar.set_postfix({'loss': running_loss, 'avg_loss': avg_loss})
                 for key in loss_dict.keys():
-                    log_writer.add_scalar(f'{key}', loss_dict[key], i + start_num_samples)
+                    log_writer.add_scalar(f'{key}', loss_dict[key], i + start_num_batches)
 
-        return avg_loss, start_num_samples
+        return avg_loss, start_num_batches
 
 
 if __name__ == '__main__':
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     session_dir = r"./experiments/world_model-door_key-7"
-    dataset_samples = int(1e2)
+    dataset_samples = int(1e4)
     dataset_repeat_each_epoch = 10
     num_epochs = 20
     batch_size = 32
@@ -482,7 +500,7 @@ if __name__ == '__main__':
         disc_conv_arch=disc_conv_arch,
         lr=lr,
         discriminator_lr=discriminator_lr,
-    )
+    ).to(device)
 
     for epoch in range(num_epochs):
         print(f"Start epoch {epoch + 1} / {num_epochs}:")
@@ -493,7 +511,7 @@ if __name__ == '__main__':
         loss, _ = world_model.train_epoch(
             dataloader,
             log_writer,
-            start_num_samples=epoch * dataset_samples * dataset_repeat_each_epoch,
+            start_num_batches=epoch * len(dataloader),
         )
         if loss < min_loss:
             min_loss = loss

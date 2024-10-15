@@ -318,7 +318,7 @@ class WorldModel(nn.Module):
         predicted_next_homo_latent_state, mean, logvar, predicted_reward = self.transition_model(homo_latent_state, action)
 
         # Make homomorphism next state
-        predicted_next_state = torch.cat([predicted_next_homo_latent_state, latent_next_state[:, self.num_homomorphism_channels:-1, :, :]], dim=1)
+        predicted_next_state = torch.cat([predicted_next_homo_latent_state, latent_next_state[:, self.num_homomorphism_channels:, :, :]], dim=1)
 
         # Reconstruct the predicted next state
         reconstructed_state = self.decoder(predicted_next_state)

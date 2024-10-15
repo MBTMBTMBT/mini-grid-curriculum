@@ -52,9 +52,12 @@ class GymDataset(Dataset):
                 # Store the data for each parallel environment
                 for env_idx in range(self.num_envs):
                     if len(self.data) < total_samples:  # Ensure we don't overshoot the target samples
-                        repeat = self.movement_augmentation if np.allclose(
-                            obs[env_idx], final_next_obs[env_idx], rtol=1e-5, atol=1e-8,
-                        ) else 0
+                        if self.movement_augmentation > 0:
+                            repeat = self.movement_augmentation if np.allclose(
+                                obs[env_idx], final_next_obs[env_idx], rtol=1e-5, atol=1e-8,
+                            ) else 0
+                        else:
+                            repeat = 0
                         for _ in range(1 + repeat):
                             self.data.append({
                                 'obs': torch.tensor(obs[env_idx], dtype=torch.float32),

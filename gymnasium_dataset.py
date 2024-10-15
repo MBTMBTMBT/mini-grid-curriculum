@@ -9,7 +9,7 @@ from task_config import TaskConfig, make_env
 
 
 class GymDataset(Dataset):
-    def __init__(self, env: VecEnv, epoch_size: int):
+    def __init__(self, env: VecEnv, epoch_size: int, repeat: int = 1):
         """
         Args:
             env: A pre-created vectorized environment (VecEnv).
@@ -19,6 +19,7 @@ class GymDataset(Dataset):
         self.epoch_size = epoch_size
         self.num_envs = self.env.num_envs  # Retrieve the number of environments from the provided VecEnv
         self.data = []
+        self.repeat = repeat  # Store the repeat factor
 
         # Initial sampling to populate the dataset
         self.resample()
@@ -62,10 +63,14 @@ class GymDataset(Dataset):
                 pbar.update(self.num_envs)
 
     def __len__(self):
-        return len(self.data)
+        """Return the length of the dataset, considering the repeat factor."""
+        return len(self.data) * self.repeat
 
     def __getitem__(self, idx):
-        item = self.data[idx]
+        """Return a data sample, remapping the index if necessary to repeat data."""
+        # Remap index to the range of original data
+        original_idx = idx % len(self.data)
+        item = self.data[original_idx]
         return item['obs'], item['action'], item['next_obs'], item['reward'], item['done']
 
 

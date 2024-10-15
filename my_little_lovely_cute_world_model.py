@@ -406,22 +406,25 @@ class WorldModel(nn.Module):
         # Make homomorphism next state
         predicted_next_state = torch.cat([predicted_next_homo_latent_state, latent_state[:, self.num_homomorphism_channels:, :, :]], dim=1)
 
-        # Reconstruct the predicted next state
-        reconstructed_state = self.decoder(predicted_next_state)
+        # Reconstruct the state and predicted next state
+        reconstructed_state = self.decoder(latent_state)
+        reconstructed_next_state = self.decoder(predicted_next_state)
 
-        # **Resize the next state** to match the size of the reconstructed state
-        resized_next_state = F.interpolate(state, size=reconstructed_state.shape[2:], mode='bilinear',
+        # **Resize the states** to match the size of the reconstructed state
+        resized_state = F.interpolate(state, size=reconstructed_state.shape[2:], mode='bilinear',
+                                           align_corners=False)
+        resized_next_state = F.interpolate(next_state, size=reconstructed_next_state.shape[2:], mode='bilinear',
                                            align_corners=False)
 
         # --------------------
         # Discriminator Training
         # --------------------
-        real_labels = torch.ones(state.size(0), 1).to(device)
-        fake_labels = torch.zeros(state.size(0), 1).to(device)
+        real_labels = torch.ones(state.size(0)*2, 1).to(device)
+        fake_labels = torch.zeros(state.size(0)*2, 1).to(device)
 
         # Train discriminator on real and fake images
-        real_outputs = self.discriminator(resized_next_state)
-        fake_outputs = self.discriminator(reconstructed_state.detach())
+        real_outputs = self.discriminator(torch.cat([resized_state, resized_next_state], dim=0))
+        fake_outputs = self.discriminator(torch.cat([reconstructed_state.detach(), reconstructed_next_state.detach()], dim=0))
 
         d_real_loss = self.adversarial_loss(real_outputs, real_labels)
         d_fake_loss = self.adversarial_loss(fake_outputs, fake_labels)
@@ -435,11 +438,11 @@ class WorldModel(nn.Module):
         # Generator (Decoder) Loss
         # --------------------
         # Try to fool the discriminator with the generated image
-        g_fake_outputs = self.discriminator(reconstructed_state)
+        g_fake_outputs = self.discriminator(torch.cat([reconstructed_state, reconstructed_next_state], dim=0))
         adversarial_loss = self.adversarial_loss(g_fake_outputs, real_labels)
 
         # Compute reconstruction loss (MSE) between the reconstructed and resized next state
-        reconstruction_loss = self.mse_loss(reconstructed_state, resized_next_state)
+        reconstruction_loss = self.mse_loss(torch.cat([reconstructed_state, reconstructed_next_state], dim=0), torch.cat([resized_state, resized_next_state], dim=0))
 
         # Combine the losses with the given weights (0.9 for MSE, 0.1 for adversarial)
         generator_loss = 0.9 * reconstruction_loss + 0.1 * adversarial_loss
@@ -569,7 +572,7 @@ if __name__ == '__main__':
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     session_dir = r"./experiments/world_model-door_key-7"
-    dataset_samples = int(1e3)
+    dataset_samples = int(1e4)
     dataset_repeat_each_epoch = 5
     num_epochs = 20
     batch_size = 32

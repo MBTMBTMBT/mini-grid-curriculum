@@ -364,10 +364,11 @@ class WorldModel(nn.Module):
 
         # Encode the current and next state
         latent_state = self.encoder(state)
-        # latent_next_state = self.encoder(next_state)
+        latent_next_state = self.encoder(next_state)
 
-        # Make homomorphism state
+        # Make homomorphism states
         homo_latent_state = latent_state[:, 0:self.num_homomorphism_channels, :, :]
+        homo_latent_next_state = latent_next_state[:, 0:self.num_homomorphism_channels, :, :]
 
         # Predict the next latent state and reward with the transition model
         action = F.one_hot(action, self.num_actions).type(torch.float)
@@ -418,9 +419,9 @@ class WorldModel(nn.Module):
         # --------------------
         # VAE Loss (Reconstruction + KL Divergence)
         # --------------------
-        recon_loss = self.mse_loss(reconstructed_state, resized_next_state)
+        latent_transition_loss = self.mse_loss(homo_latent_next_state, predicted_next_homo_latent_state)
         kl_loss = -0.5 * torch.sum(1 + logvar - mean.pow(2) - logvar.exp())
-        vae_loss = recon_loss + kl_loss
+        vae_loss = homo_latent_next_state + kl_loss
 
         # --------------------
         # Reward Prediction Loss
@@ -447,7 +448,7 @@ class WorldModel(nn.Module):
             "discriminator_loss": discriminator_loss.detach().cpu().item(),
             "generator_loss": generator_loss.detach().cpu().item(),
             "vae_loss": vae_loss.detach().cpu().item(),
-            "reconstruction_loss": recon_loss.detach().cpu().item(),
+            "latent_transition_loss": latent_transition_loss.detach().cpu().item(),
             "kl_loss": kl_loss.detach().cpu().item(),
             "reward_loss": reward_loss.detach().cpu().item(),
             "done_loss": done_loss.detach().cpu().item(),

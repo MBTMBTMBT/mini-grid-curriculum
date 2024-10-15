@@ -323,6 +323,7 @@ class WorldModel(nn.Module):
         # Loss functions
         self.adversarial_loss = nn.BCELoss()
         self.mse_loss = nn.MSELoss()
+        self.mae_loss = nn.L1Loss()
 
     def forward(self, state, action):
         device = next(self.parameters()).device
@@ -448,7 +449,9 @@ class WorldModel(nn.Module):
         adversarial_loss = self.adversarial_loss(g_fake_outputs, real_labels)
 
         # Compute reconstruction loss (MSE) between the reconstructed and resized next state
-        reconstruction_loss = self.mse_loss(torch.cat([reconstructed_state, reconstructed_next_state], dim=0), torch.cat([resized_state, resized_next_state], dim=0))
+        reconstruction_loss_mse = self.mse_loss(torch.cat([reconstructed_state, reconstructed_next_state], dim=0), torch.cat([resized_state, resized_next_state], dim=0))
+        reconstruction_loss_mae = self.mae_loss(torch.cat([reconstructed_state, reconstructed_next_state], dim=0), torch.cat([resized_state, resized_next_state], dim=0))
+        reconstruction_loss = reconstruction_loss_mse + reconstruction_loss_mae
 
         # Combine the losses with the given weights (0.9 for MSE, 0.1 for adversarial)
         generator_loss = 0.9 * reconstruction_loss + 0.1 * adversarial_loss
@@ -456,7 +459,10 @@ class WorldModel(nn.Module):
         # --------------------
         # VAE Loss (Reconstruction + KL Divergence)
         # --------------------
-        latent_transition_loss = self.mse_loss(homo_latent_next_state, predicted_next_homo_latent_state)
+        latent_transition_loss_mse = self.mse_loss(homo_latent_next_state, predicted_next_homo_latent_state)
+        latent_transition_loss_mae = self.mae_loss(homo_latent_next_state, predicted_next_homo_latent_state)
+        latent_transition_loss = latent_transition_loss_mse + latent_transition_loss_mae
+
         kl_loss = -0.5 * torch.sum(1 + logvar - mean.pow(2) - logvar.exp())
         vae_loss = latent_transition_loss + kl_loss
 
@@ -585,23 +591,25 @@ if __name__ == '__main__':
     lr = 1e-4
     discriminator_lr=5e-5
 
-    latent_shape = (16, 24, 24)  # channel, height, width
+    latent_shape = (16, 32, 32)  # channel, height, width
     num_homomorphism_channels = 12
 
     encoder_decoder_net_arch = [
         (64, 3, 2, 1),
         (128, 3, 2, 1),
-        (128, 3, 2, 1),
+        (256, 3, 1, 1),
+        (512, 3, 1, 1),
     ]
 
     disc_conv_arch = [
         (64, 3, 2, 1),
         (128, 3, 2, 1),
-        (128, 3, 2, 1),
+        (256, 3, 2, 1),
     ]
 
     transition_model_conv_arch = [
         (64, 3, 1, 1),
+        (128, 3, 1, 1),
         (128, 3, 1, 1),
         (128, 3, 1, 1),
     ]

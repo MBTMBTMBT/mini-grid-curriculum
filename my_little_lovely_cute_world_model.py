@@ -541,7 +541,7 @@ if __name__ == '__main__':
 
     session_dir = r"./experiments/world_model-door_key-7"
     dataset_samples = int(1e4)
-    dataset_repeat_each_epoch = 25
+    dataset_repeat_each_epoch = 5
     num_epochs = 20
     batch_size = 32
     lr = 1e-4

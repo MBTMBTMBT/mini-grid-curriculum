@@ -348,7 +348,7 @@ class WorldModel(nn.Module):
         reconstructed_state = self.decoder(predicted_next_state)
 
         # **Resize the next state** to match the size of the reconstructed state
-        resized_next_state = F.interpolate(state, size=reconstructed_state.shape[2:], mode='bilinear',
+        resized_next_state = F.interpolate(reconstructed_state, size=reconstructed_state.shape[2:], mode='bilinear',
                                            align_corners=False)
 
         return resized_next_state, predicted_reward, predicted_done
@@ -578,7 +578,7 @@ if __name__ == '__main__':
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     session_dir = r"./experiments/world_model-door_key-7"
-    dataset_samples = int(1e4)
+    dataset_samples = int(2e4)
     dataset_repeat_each_epoch = 5
     num_epochs = 20
     batch_size = 32

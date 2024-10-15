@@ -1,3 +1,4 @@
+import io
 import os
 from typing import Tuple, List
 
@@ -6,10 +7,12 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import gymnasium as gym
+from PIL import Image
 from gymnasium.wrappers import FrameStack, AtariPreprocessing, LazyFrames
 from gymnasium.vector import AsyncVectorEnv, VectorEnv
 import torch.nn.functional as F
 import torchvision.transforms as T
+from matplotlib import pyplot as plt
 from stable_baselines3.common.vec_env import SubprocVecEnv
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
@@ -18,6 +21,18 @@ from tqdm import tqdm
 from customize_minigrid.wrappers import FullyObsImageWrapper
 from gymnasium_dataset import GymDataset
 from task_config import TaskConfig, make_env
+
+
+# Simple dictionary to map action numbers to string labels
+action_dict = {
+    0: "left",
+    1: "right",
+    2: "forward",
+    3: "pickup",
+    4: "drop",
+    5: "toggle",
+    6: "done"
+}
 
 
 # Function to calculate the input size based on the cnn_net_arch and target latent size
@@ -274,6 +289,35 @@ class WorldModel(nn.Module):
         self.adversarial_loss = nn.BCELoss()
         self.mse_loss = nn.MSELoss()
 
+    def forward(self, state, action):
+        device = next(self.parameters()).device
+        state = state.to(device)
+        action = action.to(device)
+
+        # Encode the current and next state
+        latent_state = self.encoder(state)
+
+        # Make homomorphism state
+        homo_latent_state = latent_state[:, 0:self.num_homomorphism_channels, :, :]
+
+        # Predict the next latent state and reward with the transition model
+        action = F.one_hot(action, self.num_actions).type(torch.float)
+        predicted_next_homo_latent_state, mean, logvar, predicted_reward, predicted_done \
+            = self.transition_model(homo_latent_state, action)
+
+        # Make homomorphism next state
+        predicted_next_state = torch.cat(
+            [predicted_next_homo_latent_state, latent_state[:, self.num_homomorphism_channels:, :, :]], dim=1)
+
+        # Reconstruct the predicted next state
+        reconstructed_state = self.decoder(predicted_next_state)
+
+        # **Resize the next state** to match the size of the reconstructed state
+        resized_next_state = F.interpolate(state, size=reconstructed_state.shape[2:], mode='bilinear',
+                                           align_corners=False)
+
+        return resized_next_state, predicted_reward, predicted_done
+
     def save_model(self, epoch, loss, save_dir='models', is_best=False):
         if not os.path.exists(save_dir):
             os.makedirs(save_dir)
@@ -319,7 +363,7 @@ class WorldModel(nn.Module):
 
         # Encode the current and next state
         latent_state = self.encoder(state)
-        latent_next_state = self.encoder(next_state)
+        # latent_next_state = self.encoder(next_state)
 
         # Make homomorphism state
         homo_latent_state = latent_state[:, 0:self.num_homomorphism_channels, :, :]
@@ -330,13 +374,13 @@ class WorldModel(nn.Module):
             = self.transition_model(homo_latent_state, action)
 
         # Make homomorphism next state
-        predicted_next_state = torch.cat([predicted_next_homo_latent_state, latent_next_state[:, self.num_homomorphism_channels:, :, :]], dim=1)
+        predicted_next_state = torch.cat([predicted_next_homo_latent_state, latent_state[:, self.num_homomorphism_channels:, :, :]], dim=1)
 
         # Reconstruct the predicted next state
         reconstructed_state = self.decoder(predicted_next_state)
 
         # **Resize the next state** to match the size of the reconstructed state
-        resized_next_state = F.interpolate(next_state, size=reconstructed_state.shape[2:], mode='bilinear',
+        resized_next_state = F.interpolate(state, size=reconstructed_state.shape[2:], mode='bilinear',
                                            align_corners=False)
 
         # --------------------
@@ -362,7 +406,13 @@ class WorldModel(nn.Module):
         # --------------------
         # Try to fool the discriminator with the generated image
         g_fake_outputs = self.discriminator(reconstructed_state)
-        generator_loss = self.adversarial_loss(g_fake_outputs, real_labels)
+        adversarial_loss = self.adversarial_loss(g_fake_outputs, real_labels)
+
+        # Compute reconstruction loss (MSE) between the reconstructed and resized next state
+        reconstruction_loss = self.mse_loss(reconstructed_state, resized_next_state)
+
+        # Combine the losses with the given weights (0.9 for MSE, 0.1 for adversarial)
+        generator_loss = 0.9 * reconstruction_loss + 0.1 * adversarial_loss
 
         # --------------------
         # VAE Loss (Reconstruction + KL Divergence)
@@ -419,7 +469,69 @@ class WorldModel(nn.Module):
                 pbar.set_postfix({'loss': running_loss, 'avg_loss': avg_loss})
                 for key in loss_dict.keys():
                     log_writer.add_scalar(f'{key}', loss_dict[key], i + start_num_batches)
+            else:
+                with torch.no_grad():
+                    # Logging single combined image for each sample
+                    with torch.no_grad():
+                        for idx, (ob, action, next_ob, reward, done) in enumerate(
+                                zip(obs, actions, next_obs, rewards, dones)):
+                            if idx >= 10:
+                                break
 
+                            pred_next_ob, pred_reward, pred_done = self.forward(ob.unsqueeze(dim=0),
+                                                                                action.unsqueeze(dim=0))
+
+                            # Convert tensors from GPU to CPU
+                            ob_cpu = ob.cpu().detach().permute(1, 2, 0)  # Convert to HWC format for image display
+                            next_ob_cpu = next_ob.cpu().detach().permute(1, 2, 0)
+                            pred_next_ob_cpu = pred_next_ob.squeeze(0).cpu().detach().permute(1, 2, 0)
+
+                            # Get the string label for the action from the simple dictionary
+                            action_str = action_dict.get(action.item(), "Unknown Action")
+
+                            # Create a figure to combine all visualizations and scalar information
+                            fig, axs = plt.subplots(2, 3, figsize=(12, 8))
+
+                            # Plot images: Observation, Predicted Next Observation, Actual Next Observation
+                            axs[0, 0].imshow(ob_cpu)
+                            axs[0, 0].set_title('Observation')
+                            axs[0, 1].imshow(pred_next_ob_cpu)
+                            axs[0, 1].set_title('Predicted Next Observation')
+                            axs[0, 2].imshow(next_ob_cpu)
+                            axs[0, 2].set_title('Actual Next Observation')
+
+                            # Plot scalar values: Action, Predicted Reward/Done, Actual Reward/Done
+                            axs[1, 0].text(0.5, 0.5, f'Action: {action_str}', horizontalalignment='center',
+                                           verticalalignment='center')
+                            axs[1, 0].set_title('Action')
+                            axs[1, 0].axis('off')
+
+                            axs[1, 1].text(0.5, 0.5,
+                                           f'Predicted Reward: {pred_reward.item():.2f}\nPredicted Done: {pred_done.item():.2f}',
+                                           horizontalalignment='center', verticalalignment='center')
+                            axs[1, 1].set_title('Predicted Reward & Done')
+                            axs[1, 1].axis('off')
+
+                            axs[1, 2].text(0.5, 0.5,
+                                           f'Actual Reward: {reward.item():.2f}\nActual Done: {done.item():.2f}',
+                                           horizontalalignment='center', verticalalignment='center')
+                            axs[1, 2].set_title('Actual Reward & Done')
+                            axs[1, 2].axis('off')
+
+                            # Convert the figure to a PIL Image and then to a Tensor
+                            buf = io.BytesIO()
+                            plt.tight_layout()
+                            plt.savefig(buf, format='png')
+                            buf.seek(0)
+                            image = Image.open(buf)
+                            image_tensor = T.ToTensor()(image)
+
+                            # Log the combined image to TensorBoard
+                            log_writer.add_image(f'{i + start_num_batches}-{idx}_combined', image_tensor,
+                                                 i + start_num_batches)
+
+                            # Close the figure to free memory
+                            plt.close(fig)
         return avg_loss, start_num_batches
 
 
@@ -429,7 +541,7 @@ if __name__ == '__main__':
     session_dir = r"./experiments/world_model-door_key-7"
     dataset_samples = int(1e4)
     dataset_repeat_each_epoch = 10
-    num_epochs = 20
+    num_epochs = 50
     batch_size = 32
     lr = 1e-4
     discriminator_lr=5e-5

@@ -426,12 +426,12 @@ class WorldModel(nn.Module):
         # --------------------
         # Discriminator Training
         # --------------------
-        real_labels = torch.ones(state.size(0)*2, 1).to(device)
-        fake_labels = torch.zeros(state.size(0)*2, 1).to(device)
+        real_labels = torch.ones(state.size(0), 1).to(device)
+        fake_labels = torch.zeros(state.size(0), 1).to(device)
 
         # Train discriminator on real and fake images
-        real_outputs = self.discriminator(torch.cat([resized_state, resized_next_state], dim=0))
-        fake_outputs = self.discriminator(torch.cat([reconstructed_state.detach(), reconstructed_next_state.detach()], dim=0))
+        real_outputs = self.discriminator(resized_next_state)
+        fake_outputs = self.discriminator(reconstructed_next_state.detach())
 
         d_real_loss = self.adversarial_loss(real_outputs, real_labels)
         d_fake_loss = self.adversarial_loss(fake_outputs, fake_labels)
@@ -445,12 +445,12 @@ class WorldModel(nn.Module):
         # Generator (Decoder) Loss
         # --------------------
         # Try to fool the discriminator with the generated image
-        g_fake_outputs = self.discriminator(torch.cat([reconstructed_state, reconstructed_next_state], dim=0))
+        g_fake_outputs = self.discriminator(reconstructed_next_state)
         adversarial_loss = self.adversarial_loss(g_fake_outputs, real_labels)
 
         # Compute reconstruction loss (MSE) between the reconstructed and resized next state
-        reconstruction_loss_mse = self.mse_loss(torch.cat([reconstructed_state, reconstructed_next_state], dim=0), torch.cat([resized_state, resized_next_state], dim=0))
-        reconstruction_loss_mae = self.mae_loss(torch.cat([reconstructed_state, reconstructed_next_state], dim=0), torch.cat([resized_state, resized_next_state], dim=0))
+        reconstruction_loss_mse = self.mse_loss(reconstructed_next_state, resized_next_state)
+        reconstruction_loss_mae = self.mae_loss(reconstructed_next_state, resized_next_state)
         reconstruction_loss = reconstruction_loss_mse + reconstruction_loss_mae
 
         # Combine the losses with the given weights (0.9 for MSE, 0.1 for adversarial)

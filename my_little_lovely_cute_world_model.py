@@ -578,7 +578,7 @@ if __name__ == '__main__':
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     session_dir = r"./experiments/world_model-door_key-7"
-    dataset_samples = int(1e3)
+    dataset_samples = int(1e4)
     dataset_repeat_each_epoch = 5
     num_epochs = 20
     batch_size = 32
@@ -591,20 +591,19 @@ if __name__ == '__main__':
     encoder_decoder_net_arch = [
         (64, 3, 2, 1),
         (128, 3, 2, 1),
-        (256, 3, 2, 1),
+        (128, 3, 2, 1),
     ]
 
     disc_conv_arch = [
         (64, 3, 2, 1),
         (128, 3, 2, 1),
-        (256, 3, 2, 1),
+        (128, 3, 2, 1),
     ]
 
     transition_model_conv_arch = [
         (64, 3, 1, 1),
         (128, 3, 1, 1),
-        (256, 3, 1, 1),
-        (512, 3, 1, 1),
+        (128, 3, 1, 1),
     ]
 
     configs = []

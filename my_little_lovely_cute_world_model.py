@@ -1,3 +1,4 @@
+import os
 from typing import Tuple, List
 
 import numpy as np
@@ -9,6 +10,14 @@ from gymnasium.wrappers import FrameStack, AtariPreprocessing, LazyFrames
 from gymnasium.vector import AsyncVectorEnv, VectorEnv
 import torch.nn.functional as F
 import torchvision.transforms as T
+from stable_baselines3.common.vec_env import SubprocVecEnv
+from torch.utils.data import DataLoader
+from torch.utils.tensorboard import SummaryWriter
+from tqdm import tqdm
+
+from customize_minigrid.wrappers import FullyObsImageWrapper
+from gymnasium_dataset import GymDataset
+from task_config import TaskConfig, make_env
 
 
 # Function to calculate the input size based on the cnn_net_arch and target latent size
@@ -212,7 +221,7 @@ class TransitionModelVAE(nn.Module):
         return z_next_reshaped, mean, logvar, reward_pred
 
 
-class WorldModel:
+class WorldModel(nn.Module):
     def __init__(
             self,
             latent_shape: Tuple[int, int, int],
@@ -225,12 +234,15 @@ class WorldModel:
             lr: float = 1e-4,
             discriminator_lr: float = 1e-4,
     ):
+        super(WorldModel, self).__init__()
         self.latent_shape = latent_shape
         self.homomorphism_latent_space = (num_homomorphism_channels, latent_shape[1], latent_shape[2])
         self.encoder = Encoder(obs_shape, latent_shape, cnn_net_arch)
         self.decoder = Decoder(latent_shape, obs_shape, cnn_net_arch)
         self.transition_model = TransitionModelVAE(latent_shape, num_actions, transition_model_conv_arch)
         self.discriminator = Discriminator(obs_shape, disc_conv_arch)
+
+        self.num_actions = num_actions
 
         # Optimizer for all components except the discriminator
         self.optimizer = optim.Adam(
@@ -250,7 +262,42 @@ class WorldModel:
         self.adversarial_loss = nn.BCELoss()
         self.mse_loss = nn.MSELoss()
 
-    def train(self, state, action, reward, next_state, done):
+    def save_model(self, epoch, loss, save_dir='models', is_best=False):
+        if not os.path.exists(save_dir):
+            os.makedirs(save_dir)
+
+        checkpoint = {
+            'epoch': epoch,
+            'model_state_dict': self.state_dict(),
+            'optimizer_state_dict': self.optimizer.state_dict(),
+            'discriminator_optimizer_state_dict': self.discriminator_optimizer.state_dict(),
+            'loss': loss,
+        }
+
+        latest_path = os.path.join(save_dir, 'latest_checkpoint.pth')
+        torch.save(checkpoint, latest_path)
+        print(f"Saved latest model checkpoint at epoch {epoch} with loss {loss:.4f}")
+
+        if is_best:
+            best_path = os.path.join(save_dir, 'best_checkpoint.pth')
+            torch.save(checkpoint, best_path)
+            print(f"Saved best model checkpoint at epoch {epoch} with loss {loss:.4f}")
+
+    def load_model(self, save_dir='models', best=False):
+        checkpoint_path = os.path.join(save_dir, 'best_checkpoint.pth' if best else 'latest_checkpoint.pth')
+        if os.path.isfile(checkpoint_path):
+            checkpoint = torch.load(checkpoint_path)
+            self.load_state_dict(checkpoint['model_state_dict'])
+            self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            self.discriminator_optimizer.load_state_dict(checkpoint['discriminator_optimizer_state_dict'])
+            epoch = checkpoint['epoch']
+            loss = checkpoint['loss']
+            print(f"Loaded {'best' if best else 'latest'} model checkpoint from epoch {epoch} with loss {loss:.4f}")
+            return epoch, loss
+        else:
+            raise FileNotFoundError(f"No checkpoint found at {checkpoint_path}")
+
+    def train_minibatch(self, state, action, reward, next_state, done):
         device = next(self.parameters()).device
         state = state.to(device)
         action = action.to(device)
@@ -263,6 +310,7 @@ class WorldModel:
         latent_next_state = self.encoder(next_state)
 
         # Predict the next latent state and reward with the transition model
+        action = F.one_hot(action, self.num_actions).type(torch.float)
         predicted_next_state, mean, logvar, predicted_reward = self.transition_model(latent_state, action)
 
         # Reconstruct the predicted next state
@@ -310,24 +358,9 @@ class WorldModel:
         reward_loss = self.mse_loss(predicted_reward.squeeze(), reward)
 
         # --------------------
-        # Critic Loss (TD error)
-        # --------------------
-        critic_value = self.critic(latent_state)
-        next_value = self.critic(latent_next_state) * (1 - done)
-        target_value = reward + self.gamma * next_value
-        value_loss = self.mse_loss(critic_value, target_value.detach())
-
-        # --------------------
-        # Actor Loss
-        # --------------------
-        action_probs = self.actor(latent_state)
-        log_action_probs = torch.log(action_probs + 1e-6)
-        actor_loss = -(log_action_probs * critic_value.detach()).mean()
-
-        # --------------------
         # Total Loss (except Discriminator)
         # --------------------
-        total_loss = vae_loss + value_loss + actor_loss + reward_loss + generator_loss
+        total_loss = vae_loss + reward_loss + generator_loss
 
         # Optimize the components except for the discriminator
         self.optimizer.zero_grad()
@@ -342,9 +375,120 @@ class WorldModel:
             "reconstruction_loss": recon_loss.detach().cpu().item(),
             "kl_loss": kl_loss.detach().cpu().item(),
             "reward_loss": reward_loss.detach().cpu().item(),
-            "critic_loss": value_loss.detach().cpu().item(),
-            "actor_loss": actor_loss.detach().cpu().item(),
             "total_loss": total_loss.detach().cpu().item(),
         }
 
         return loss_dict
+
+    def train_epoch(self, dataloader: DataLoader, log_writer: SummaryWriter, start_num_samples=0):
+        total_samples = len(dataloader) * dataloader.batch_size
+        total_loss = 0.0
+        with tqdm(total=total_samples, desc="Training", unit="sample") as pbar:
+            for i, batch in enumerate(dataloader):
+                obs, actions, next_obs, rewards, dones = batch
+                loss_dict = self.train_minibatch(obs, actions, rewards, next_obs, dones)
+                running_loss = loss_dict['total_loss']
+                total_loss += running_loss
+                avg_loss = total_loss / (i + 1)
+                pbar.update(len(obs))
+                pbar.set_postfix({'loss': running_loss, 'avg_loss': avg_loss})
+                for key in loss_dict.keys():
+                    log_writer.add_scalar(f'{key}', loss_dict[key], i + start_num_samples)
+
+        return avg_loss, start_num_samples
+
+
+if __name__ == '__main__':
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    session_dir = r"./experiments/world_model-door_key-7"
+    dataset_samples = int(1e2)
+    dataset_repeat_each_epoch = 10
+    num_epochs = 20
+    batch_size = 32
+    lr = 1e-4
+    discriminator_lr=5e-5
+
+    latent_shape = (16, 16, 16)  # channel, height, width
+    encoder_decoder_net_arch = [
+        (64, 3, 2, 1),
+        (128, 3, 2, 1),
+        (256, 3, 2, 1),
+    ]
+
+    disc_conv_arch = [
+        (64, 3, 2, 1),
+        (128, 3, 2, 1),
+        (256, 3, 2, 1),
+    ]
+
+    transition_model_conv_arch = [
+        (64, 4, 2, 1),
+        (128, 4, 2, 1),
+        (256, 4, 2, 1),
+    ]
+
+    configs = []
+    for i in range(1, 7):
+        config = TaskConfig()
+        config.name = f"7-{i}"
+        config.rand_gen_shape = None
+        config.txt_file_path = f"./maps/7-{i}.txt"
+        config.custom_mission = "reach the goal"
+        config.minimum_display_size = 7
+        config.display_mode = "random"
+        config.random_rotate = True
+        config.random_flip = True
+        config.max_steps = 1024
+        config.start_pos = (5, 5)
+        config.train_total_steps = 2.5e7
+        config.difficulty_level = 0
+        config.add_random_door_key = False
+        configs.append(config)
+
+    max_minimum_display_size = 0
+    for config in configs:
+        if config.minimum_display_size > max_minimum_display_size:
+            max_minimum_display_size = config.minimum_display_size
+
+    venv = SubprocVecEnv([
+        lambda: make_env(each_task_config, FullyObsImageWrapper, max_minimum_display_size)
+        for each_task_config in configs
+    ])
+
+    dataset = GymDataset(venv, data_size=dataset_samples, repeat=dataset_repeat_each_epoch)
+    print(len(dataset))
+    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, drop_last=True)
+    print(len(dataloader))
+
+    log_dir = os.path.join(session_dir, "logs")
+    os.makedirs(log_dir, exist_ok=True)
+    log_writer = SummaryWriter(log_dir=log_dir)
+
+    world_model = WorldModel(
+        latent_shape=latent_shape,
+        num_homomorphism_channels=8,
+        obs_shape=venv.observation_space.shape,
+        num_actions=venv.action_space.n,
+        cnn_net_arch=encoder_decoder_net_arch,
+        transition_model_conv_arch=transition_model_conv_arch,
+        disc_conv_arch=disc_conv_arch,
+        lr=lr,
+        discriminator_lr=discriminator_lr,
+    )
+
+    for epoch in range(num_epochs):
+        print(f"Start epoch {epoch + 1} / {num_epochs}:")
+        print("Resampling dataset...")
+        dataset.resample()
+        print("Starting training...")
+        min_loss = float('inf')
+        loss, _ = world_model.train_epoch(
+            dataloader,
+            log_writer,
+            start_num_samples=epoch * dataset_samples * dataset_repeat_each_epoch,
+        )
+        if loss < min_loss:
+            min_loss = loss
+            world_model.save_model(epoch, loss, is_best=True)
+        world_model.save_model(epoch, loss)

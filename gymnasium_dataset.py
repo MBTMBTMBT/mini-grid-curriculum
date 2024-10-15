@@ -53,9 +53,9 @@ class GymDataset(Dataset):
                 for env_idx in range(self.num_envs):
                     if len(self.data) < total_samples:  # Ensure we don't overshoot the target samples
                         if self.movement_augmentation > 0:
-                            repeat = self.movement_augmentation if np.allclose(
+                            repeat = 0 if np.allclose(
                                 obs[env_idx], final_next_obs[env_idx], rtol=1e-5, atol=1e-8,
-                            ) else 0
+                            ) else self.movement_augmentation
                         else:
                             repeat = 0
                         for _ in range(1 + repeat):

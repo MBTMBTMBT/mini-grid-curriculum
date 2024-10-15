@@ -368,8 +368,7 @@ class WorldModel(nn.Module):
 
         # Make homomorphism states
         homo_latent_state = latent_state[:, 0:self.num_homomorphism_channels, :, :]
-        # do not use gradient from latent_next_state to update encoder.
-        homo_latent_next_state = latent_next_state.clone().detach()[:, 0:self.num_homomorphism_channels, :, :]
+        homo_latent_next_state = latent_next_state[:, 0:self.num_homomorphism_channels, :, :]
 
         # Predict the next latent state and reward with the transition model
         action = F.one_hot(action, self.num_actions).type(torch.float)

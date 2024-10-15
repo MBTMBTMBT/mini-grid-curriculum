@@ -9,7 +9,7 @@ from task_config import TaskConfig, make_env
 
 
 class GymDataset(Dataset):
-    def __init__(self, env: VecEnv, data_size: int, repeat: int = 1):
+    def __init__(self, env: VecEnv, data_size: int, repeat: int = 1, movement_augmentation: int = 0):
         """
         Args:
             env: A pre-created vectorized environment (VecEnv).
@@ -20,6 +20,9 @@ class GymDataset(Dataset):
         self.num_envs = self.env.num_envs  # Retrieve the number of environments from the provided VecEnv
         self.data = []
         self.repeat = repeat  # Store the repeat factor
+        self.movement_augmentation = movement_augmentation
+        if self.movement_augmentation < 0:
+            self.movement_augmentation = 0
 
         # Initial sampling to populate the dataset
         # self.resample()
@@ -31,6 +34,7 @@ class GymDataset(Dataset):
 
         # Collect data for the entire epoch with a progress bar showing the number of actual samples
         total_samples = self.data_size
+        augmented = 0
         with tqdm(total=total_samples, desc="Sampling Data", unit="sample") as pbar:
             while len(self.data) < total_samples:
                 # Sample actions for each parallel environment
@@ -48,19 +52,26 @@ class GymDataset(Dataset):
                 # Store the data for each parallel environment
                 for env_idx in range(self.num_envs):
                     if len(self.data) < total_samples:  # Ensure we don't overshoot the target samples
-                        self.data.append({
-                            'obs': torch.tensor(obs[env_idx], dtype=torch.float32),
-                            'action': torch.tensor(actions[env_idx], dtype=torch.int64),
-                            'next_obs': torch.tensor(final_next_obs[env_idx], dtype=torch.float32),
-                            'reward': torch.tensor(rewards[env_idx], dtype=torch.float32),
-                            'done': torch.tensor(dones[env_idx], dtype=torch.bool)
-                        })
+                        repeat = self.movement_augmentation if np.allclose(
+                            obs[env_idx], final_next_obs[env_idx], rtol=1e-5, atol=1e-8,
+                        ) else 0
+                        for _ in range(1 + repeat):
+                            self.data.append({
+                                'obs': torch.tensor(obs[env_idx], dtype=torch.float32),
+                                'action': torch.tensor(actions[env_idx], dtype=torch.int64),
+                                'next_obs': torch.tensor(final_next_obs[env_idx], dtype=torch.float32),
+                                'reward': torch.tensor(rewards[env_idx], dtype=torch.float32),
+                                'done': torch.tensor(dones[env_idx], dtype=torch.bool)
+                            })
+                        augmented += repeat
+
+                        # Update the progress bar with the number of samples collected in this step
+                        pbar.update(1 + repeat)
 
                 # Update the observation for the next step
                 obs = next_obs
 
-                # Update the progress bar with the number of samples collected in this step
-                pbar.update(self.num_envs)
+        print(f"{total_samples} samples collected, including {augmented} augmented.")
 
     def __len__(self):
         """Return the length of the dataset, considering the repeat factor."""

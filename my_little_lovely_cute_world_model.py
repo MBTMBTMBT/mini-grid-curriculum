@@ -634,7 +634,7 @@ if __name__ == '__main__':
         for each_task_config in configs
     ])
 
-    dataset = GymDataset(venv, data_size=dataset_samples, repeat=dataset_repeat_each_epoch)
+    dataset = GymDataset(venv, data_size=dataset_samples, repeat=dataset_repeat_each_epoch, movement_augmentation=3)
     print(len(dataset))
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, drop_last=True)
     print(len(dataloader))

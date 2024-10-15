@@ -9,20 +9,20 @@ from task_config import TaskConfig, make_env
 
 
 class GymDataset(Dataset):
-    def __init__(self, env: VecEnv, epoch_size: int, repeat: int = 1):
+    def __init__(self, env: VecEnv, data_size: int, repeat: int = 1):
         """
         Args:
             env: A pre-created vectorized environment (VecEnv).
-            epoch_size: The number of steps for one epoch of data collection.
+            data_size: The number of steps for one epoch of data collection.
         """
         self.env = env  # Use the provided VecEnv
-        self.epoch_size = epoch_size
+        self.data_size = data_size
         self.num_envs = self.env.num_envs  # Retrieve the number of environments from the provided VecEnv
         self.data = []
         self.repeat = repeat  # Store the repeat factor
 
         # Initial sampling to populate the dataset
-        self.resample()
+        # self.resample()
 
     def resample(self):
         """Resample the data by interacting with the environment and collecting new data for one epoch."""
@@ -30,7 +30,7 @@ class GymDataset(Dataset):
         obs = self.env.reset()  # Reset the environment to get the initial observations
 
         # Collect data for the entire epoch with a progress bar showing the number of actual samples
-        total_samples = self.epoch_size
+        total_samples = self.data_size
         with tqdm(total=total_samples, desc="Sampling Data", unit="sample") as pbar:
             while len(self.data) < total_samples:
                 # Sample actions for each parallel environment
@@ -64,12 +64,12 @@ class GymDataset(Dataset):
 
     def __len__(self):
         """Return the length of the dataset, considering the repeat factor."""
-        return len(self.data) * self.repeat
+        return self.data_size * self.repeat
 
     def __getitem__(self, idx):
         """Return a data sample, remapping the index if necessary to repeat data."""
         # Remap index to the range of original data
-        original_idx = idx % len(self.data)
+        original_idx = idx % self.data_size
         item = self.data[original_idx]
         return item['obs'], item['action'], item['next_obs'], item['reward'], item['done']
 

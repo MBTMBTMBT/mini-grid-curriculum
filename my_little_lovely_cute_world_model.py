@@ -154,7 +154,7 @@ class TransitionModelVAE(nn.Module):
         """
         :param latent_shape: Shape of the latent space (channels, height, width)
         :param action_dim: Dimensionality of the action space
-        :param conv_arch: Convolutional network architecture, e.g., [(64, 4, 2, 1), (128, 4, 2, 1)]
+        :param conv_arch: Convolutional network architecture for the encoder, e.g., [(64, 4, 2, 1), (128, 4, 2, 1)]
         """
         super(TransitionModelVAE, self).__init__()
         latent_channels, latent_height, latent_width = latent_shape
@@ -176,41 +176,69 @@ class TransitionModelVAE(nn.Module):
         self.conv_encoder = nn.Sequential(*conv_layers)
 
         # Dynamically calculate the flattened size after the convolutional layers
-        self.flattened_size = self._get_flattened_size(latent_shape, conv_arch)
+        self.output_shape = self._get_output_shape(latent_shape, conv_arch)
 
-        # Fully connected layers to generate mean and logvar
-        self.fc_mean = nn.Linear(self.flattened_size, latent_channels * latent_height * latent_width)
-        self.fc_logvar = nn.Linear(self.flattened_size, latent_channels * latent_height * latent_width)
+        # Convolutional layers to generate mean and logvar
+        self.conv_mean = nn.Conv2d(self.output_shape[0], self.output_shape[0], kernel_size=1)
+        self.conv_logvar = nn.Conv2d(self.output_shape[0], self.output_shape[0], kernel_size=1)
+
+        # Generate deconv architecture automatically by reversing conv_arch
+        deconv_arch = self._create_deconv_arch(conv_arch, latent_channels)
+
+        # Deconvolutional layers to decode the latent representation back to the original shape
+        deconv_layers = []
+        in_channels = self.output_shape[0]
+        for out_channels, kernel_size, stride, padding in deconv_arch:
+            deconv_layers.append(nn.ConvTranspose2d(in_channels, out_channels, kernel_size, stride, padding))
+            deconv_layers.append(nn.ReLU())
+            in_channels = out_channels
+
+        self.deconv_decoder = nn.Sequential(*deconv_layers)
 
         # Reward predictor
         self.reward_predictor = nn.Sequential(
-            nn.Linear(self.flattened_size, 256),
+            nn.Linear(self.output_shape[0] * self.output_shape[1] * self.output_shape[2], 256),
             nn.ReLU(),
             nn.Linear(256, 1)  # Predict reward, output a scalar
         )
 
         # Done predictor
         self.done_predictor = nn.Sequential(
-            nn.Linear(self.flattened_size, 256),
+            nn.Linear(self.output_shape[0] * self.output_shape[1] * self.output_shape[2], 256),
             nn.ReLU(),
             nn.Linear(256, 1),
             nn.Sigmoid()
         )
 
-    def _get_flattened_size(self, latent_shape, conv_arch):
+    def _get_output_shape(self, latent_shape, conv_arch):
         """
-        Dynamically calculate the flattened size based on the given convolutional architecture and input shape
+        Dynamically calculate the output shape based on the given convolutional architecture and input shape.
         """
         # Assume batch_size = 1, create a dummy input
-        sample_tensor = torch.zeros(1, latent_shape[0] * 2, latent_shape[1], latent_shape[2])  # Channels doubled after concatenation
+        sample_tensor = torch.zeros(1, latent_shape[0] * 2, latent_shape[1], latent_shape[2]).to(next(self.parameters()).device)  # Channels doubled after concatenation
         sample_tensor = self.conv_encoder(sample_tensor)
-        return sample_tensor.numel()
+        output_shape = sample_tensor.shape[1:]  # Shape after conv layers, excluding batch size
+        return output_shape
+
+    def _create_deconv_arch(self, conv_arch, latent_channels):
+        """
+        Create deconv architecture by reversing the conv_arch with suitable modifications.
+        The kernel_size, stride, and padding are the same, but reversed to recover the original dimensions.
+        Ensure that the final layer outputs latent_channels.
+        """
+        deconv_arch = []
+        for i, (out_channels, kernel_size, stride, padding) in enumerate(reversed(conv_arch)):
+            # If it's the last layer, ensure that the output channels match latent_channels
+            if i == len(conv_arch) - 1:
+                out_channels = latent_channels
+            deconv_arch.append((out_channels, kernel_size, stride, padding))
+        return deconv_arch
 
     def forward(self, latent_state, action):
         """
         :param latent_state: (batch_size, latent_channels, latent_height, latent_width)
         :param action: (batch_size, action_dim)
-        :return: z_next: Next latent state, mean: Mean of the latent distribution, logvar: Log variance, reward_pred: Predicted reward
+        :return: z_next: Next latent state, mean: Mean of the latent distribution, logvar: Log variance, reward_pred: Predicted reward, done_pred: Predicted done state
         """
         batch_size, latent_channels, latent_height, latent_width = latent_state.shape
 
@@ -218,23 +246,26 @@ class TransitionModelVAE(nn.Module):
         action_embed = self.action_embed(action)
         action_embed = action_embed.view(batch_size, latent_channels, latent_height, latent_width)
 
-        # Concatenate action embedding and latent state, rather than adding them
+        # Concatenate action embedding and latent state
         x = torch.cat([latent_state, action_embed], dim=1)  # Channels doubled after concatenation
 
         # Process through the convolutional encoder
         x = self.conv_encoder(x)
 
-        # Flatten for the fully connected layers
-        x_flat = x.view(batch_size, -1)
-
-        # Generate mean and logvar
-        mean = self.fc_mean(x_flat)
-        logvar = self.fc_logvar(x_flat)
+        # Generate mean and logvar using 1x1 convolutions over the encoded feature map
+        mean = self.conv_mean(x)
+        logvar = self.conv_logvar(x)
 
         # Reparameterization trick
         std = torch.exp(0.5 * logvar)
         eps = torch.randn_like(std)
         z_next = mean + eps * std
+
+        # Decode the latent vector back to the original latent state shape using deconv layers
+        z_next_decoded = self.deconv_decoder(z_next)
+
+        # Flatten for reward and done prediction
+        x_flat = x.view(batch_size, -1)
 
         # Predict reward
         reward_pred = self.reward_predictor(x_flat)
@@ -242,10 +273,7 @@ class TransitionModelVAE(nn.Module):
         # Predict done
         done_pred = self.done_predictor(x_flat)
 
-        # Reshape z_next to (batch_size, latent_channels, latent_height, latent_width)
-        z_next_reshaped = z_next.view(batch_size, latent_channels, latent_height, latent_width)
-
-        return z_next_reshaped, mean, logvar, reward_pred, done_pred
+        return z_next_decoded, mean, logvar, reward_pred, done_pred
 
 
 class WorldModel(nn.Module):
@@ -541,7 +569,7 @@ if __name__ == '__main__':
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     session_dir = r"./experiments/world_model-door_key-7"
-    dataset_samples = int(1e4)
+    dataset_samples = int(1e3)
     dataset_repeat_each_epoch = 5
     num_epochs = 20
     batch_size = 32
@@ -555,21 +583,18 @@ if __name__ == '__main__':
         (64, 3, 2, 1),
         (128, 3, 2, 1),
         (256, 3, 2, 1),
-        (512, 3, 1, 1),
     ]
 
     disc_conv_arch = [
         (64, 3, 2, 1),
         (128, 3, 2, 1),
         (256, 3, 2, 1),
-        (512, 3, 1, 1),
     ]
 
     transition_model_conv_arch = [
-        (64, 4, 2, 1),
-        (128, 4, 2, 1),
-        (256, 4, 2, 1),
-        (512, 4, 1, 1),
+        (64, 4, 1, 1),
+        (128, 4, 1, 1),
+        (256, 4, 1, 1),
     ]
 
     configs = []

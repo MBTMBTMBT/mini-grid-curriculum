@@ -368,7 +368,8 @@ class WorldModel(nn.Module):
 
         # Make homomorphism states
         homo_latent_state = latent_state[:, 0:self.num_homomorphism_channels, :, :]
-        homo_latent_next_state = latent_next_state[:, 0:self.num_homomorphism_channels, :, :]
+        # do not use gradient from latent_next_state to update encoder.
+        homo_latent_next_state = latent_next_state.clone().detach()[:, 0:self.num_homomorphism_channels, :, :]
 
         # Predict the next latent state and reward with the transition model
         action = F.one_hot(action, self.num_actions).type(torch.float)
@@ -421,7 +422,7 @@ class WorldModel(nn.Module):
         # --------------------
         latent_transition_loss = self.mse_loss(homo_latent_next_state, predicted_next_homo_latent_state)
         kl_loss = -0.5 * torch.sum(1 + logvar - mean.pow(2) - logvar.exp())
-        vae_loss = homo_latent_next_state + kl_loss
+        vae_loss = latent_transition_loss + kl_loss
 
         # --------------------
         # Reward Prediction Loss

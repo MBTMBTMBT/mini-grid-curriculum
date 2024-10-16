@@ -231,7 +231,7 @@ class TransitionModelVAE(nn.Module):
         in_channels = latent_channels + action_dim  # Action channels are directly concatenated
         for out_channels, kernel_size, stride, padding in conv_arch:
             conv_layers.append(nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding))
-            conv_layers.append(nn.ReLU())
+            conv_layers.append(nn.LeakyReLU(0.2))
             in_channels = out_channels
 
         self.conv_encoder = nn.Sequential(*conv_layers)
@@ -242,13 +242,17 @@ class TransitionModelVAE(nn.Module):
         # More complex conv_mean and conv_logvar layers (with padding and stride 1 to keep size constant)
         self.conv_mean = nn.Sequential(
             nn.Conv2d(self.output_shape[0], self.output_shape[0], kernel_size=3, padding=1),
-            nn.ReLU(),
+            nn.LeakyReLU(0.2),
+            nn.Conv2d(self.output_shape[0], self.output_shape[0], kernel_size=3, padding=1),
+            nn.LeakyReLU(0.2),
             nn.Conv2d(self.output_shape[0], self.output_shape[0], kernel_size=3, padding=1)
         )
 
         self.conv_logvar = nn.Sequential(
             nn.Conv2d(self.output_shape[0], self.output_shape[0], kernel_size=3, padding=1),
-            nn.ReLU(),
+            nn.LeakyReLU(0.2),
+            nn.Conv2d(self.output_shape[0], self.output_shape[0], kernel_size=3, padding=1),
+            nn.LeakyReLU(0.2),
             nn.Conv2d(self.output_shape[0], self.output_shape[0], kernel_size=3, padding=1)
         )
 
@@ -260,7 +264,7 @@ class TransitionModelVAE(nn.Module):
         in_channels = self.output_shape[0]
         for out_channels, kernel_size, stride, padding in deconv_arch:
             deconv_layers.append(nn.ConvTranspose2d(in_channels, out_channels, kernel_size, stride, padding))
-            deconv_layers.append(nn.ReLU())
+            deconv_layers.append(nn.LeakyReLU(0.2))
             in_channels = out_channels
 
         self.deconv_decoder = nn.Sequential(*deconv_layers)
@@ -268,14 +272,14 @@ class TransitionModelVAE(nn.Module):
         # Reward predictor
         self.reward_predictor = nn.Sequential(
             nn.Linear(self.output_shape[0] * self.output_shape[1] * self.output_shape[2], 256),
-            nn.ReLU(),
+            nn.LeakyReLU(0.2),
             nn.Linear(256, 1)  # Predict reward, output a scalar
         )
 
         # Done predictor
         self.done_predictor = nn.Sequential(
             nn.Linear(self.output_shape[0] * self.output_shape[1] * self.output_shape[2], 256),
-            nn.ReLU(),
+            nn.LeakyReLU(0.2),
             nn.Linear(256, 1),
             nn.Sigmoid()
         )
@@ -366,8 +370,8 @@ class WorldModel(nn.Module):
         self.encoder = Encoder(obs_shape, latent_shape, cnn_net_arch)
         self.decoder = Decoder(latent_shape, obs_shape, cnn_net_arch)
         self.transition_model = TransitionModelVAE(self.homomorphism_latent_space, num_actions, transition_model_conv_arch)
-        self.discriminator = Discriminator(obs_shape, disc_conv_arch)
-        self.comparison_discriminator = ComparisonDiscriminator(obs_shape, disc_conv_arch)
+        # self.image_discriminator = ComparisonDiscriminator(obs_shape, disc_conv_arch)
+        # self.transition_discriminator = ComparisonDiscriminator(obs_shape, disc_conv_arch)
 
         self.num_actions = num_actions
 
@@ -380,11 +384,11 @@ class WorldModel(nn.Module):
         )
 
         # Separate optimizer for the discriminator
-        self.discriminator_optimizer = optim.Adam(
-            list(self.comparison_discriminator.parameters()) +
-            list(self.discriminator.parameters()),
-            lr=discriminator_lr
-        )
+        # self.discriminator_optimizer = optim.Adam(
+        #     list(self.transition_discriminator.parameters()) +
+        #     list(self.image_discriminator.parameters()),
+        #     lr=discriminator_lr
+        # )
 
         # Loss functions
         self.adversarial_loss = nn.BCELoss()
@@ -465,7 +469,7 @@ class WorldModel(nn.Module):
 
         # Encode the current and next state
         latent_state = self.encoder(state)
-        latent_next_state = self.encoder(next_state)
+        latent_next_state = self.encoder(next_state).detach()
 
         # Make homomorphism states
         homo_latent_state = latent_state[:, 0:self.num_homomorphism_channels, :, :]
@@ -499,44 +503,48 @@ class WorldModel(nn.Module):
         resized_next_state = F.interpolate(next_state, size=reconstructed_predicted_next_state.shape[2:], mode='bilinear',
                                            align_corners=False)
 
-        # --------------------
-        # Discriminator Training
-        # --------------------
-        real_labels = torch.ones(state.size(0), 1).to(device)
-        fake_labels = torch.zeros(state.size(0), 1).to(device)
+        # # --------------------
+        # # Discriminator Training
+        # # --------------------
+        # real_labels = torch.ones(state.size(0), 1).to(device)
+        # fake_labels = torch.zeros(state.size(0), 1).to(device)
 
-        # Train discriminator on real and fake images
-        real_outputs = self.discriminator(resized_next_state)
-        fake_outputs = self.discriminator(reconstructed_next_state.detach())
-        d_real_loss = self.adversarial_loss(real_outputs, real_labels)
-        d_fake_loss = self.adversarial_loss(fake_outputs, fake_labels)
-        discriminator_loss = (d_real_loss + d_fake_loss) / 2
-
-        # Train the comparison discriminator using real and fake (reconstructed) image pairs
-        # Use both reconstructed images here so that the discriminator mainly focus on transitions
-        real_outputs = self.comparison_discriminator(
-            reconstructed_next_state.detach(), reconstructed_next_state.detach(),
-        )  # Real image compared with itself
-        fake_outputs = self.comparison_discriminator(
-            reconstructed_next_state.detach(), reconstructed_predicted_next_state.detach(),
-        )  # Real vs. Reconstructed
-
-        d_real_loss = self.adversarial_loss(real_outputs, real_labels)
-        d_fake_loss = self.adversarial_loss(fake_outputs, fake_labels)
-        discriminator_loss += (d_real_loss + d_fake_loss) / 2
-
-        self.discriminator_optimizer.zero_grad()
-        discriminator_loss.backward()
-        self.discriminator_optimizer.step()
+        # # Train discriminator on real and fake images
+        # real_outputs = self.image_discriminator(
+        #     resized_next_state, resized_next_state,
+        # )
+        # fake_outputs = self.image_discriminator(
+        #     resized_next_state, reconstructed_next_state.detach(),
+        # )
+        # d_real_loss = self.adversarial_loss(real_outputs, real_labels)
+        # d_fake_loss = self.adversarial_loss(fake_outputs, fake_labels)
+        # discriminator_loss = (d_real_loss + d_fake_loss) / 2
+        #
+        # # Train the comparison discriminator using real and fake (reconstructed) image pairs
+        # # Use both reconstructed images here so that the discriminator mainly focus on transitions
+        # real_outputs = self.transition_discriminator(
+        #     reconstructed_next_state.detach(), reconstructed_next_state.detach(),
+        # )  # Real image compared with itself
+        # fake_outputs = self.transition_discriminator(
+        #     reconstructed_next_state.detach(), reconstructed_predicted_next_state.detach(),
+        # )  # Real vs. Reconstructed
+        #
+        # d_real_loss = self.adversarial_loss(real_outputs, real_labels)
+        # d_fake_loss = self.adversarial_loss(fake_outputs, fake_labels)
+        # discriminator_loss += (d_real_loss + d_fake_loss) / 2
+        #
+        # self.discriminator_optimizer.zero_grad()
+        # discriminator_loss.backward()
+        # self.discriminator_optimizer.step()
 
         # --------------------
         # Generator (Decoder) Loss
         # --------------------
-        # Try to fool the discriminator with the generated image
-        g_fake_outputs = self.discriminator(reconstructed_predicted_next_state)
-        adversarial_loss = 0.25 * self.adversarial_loss(g_fake_outputs, real_labels)
-        g_fake_outputs = self.comparison_discriminator(reconstructed_next_state.detach(), reconstructed_predicted_next_state)  # Real vs. Reconstructed
-        adversarial_loss += 0.75 * self.adversarial_loss(g_fake_outputs, real_labels)
+        # # Try to fool the discriminator with the generated image
+        # g_fake_outputs = self.image_discriminator(resized_next_state, reconstructed_next_state)
+        # adversarial_loss = 0.5 * self.adversarial_loss(g_fake_outputs, real_labels)
+        # g_fake_outputs = self.transition_discriminator(reconstructed_next_state.detach(), reconstructed_predicted_next_state)  # Real vs. Reconstructed
+        # adversarial_loss += 0.5 * self.adversarial_loss(g_fake_outputs, real_labels)
 
         # Compute reconstruction loss (MSE) between the reconstructed and resized next state
         reconstruction_loss_mse = self.mse_loss(reconstructed_predicted_next_state, resized_next_state)
@@ -544,7 +552,7 @@ class WorldModel(nn.Module):
         reconstruction_loss = reconstruction_loss_mse + reconstruction_loss_mae
 
         # Combine the losses with the given weights
-        generator_loss = 0.75 * reconstruction_loss + 0.25 * adversarial_loss
+        generator_loss = reconstruction_loss  # 0.75 * reconstruction_loss + 0.25 * adversarial_loss
 
         # --------------------
         # VAE Loss (Reconstruction + KL Divergence)
@@ -578,7 +586,7 @@ class WorldModel(nn.Module):
 
         # Return a dictionary with all the loss values
         loss_dict = {
-            "discriminator_loss": discriminator_loss.detach().cpu().item(),
+            # "discriminator_loss": discriminator_loss.detach().cpu().item(),
             "generator_loss": generator_loss.detach().cpu().item(),
             "vae_loss": vae_loss.detach().cpu().item(),
             "latent_transition_loss": latent_transition_loss.detach().cpu().item(),
@@ -698,10 +706,10 @@ if __name__ == '__main__':
     ]
 
     transition_model_conv_arch = [
-        (64, 3, 1, 1),
-        (128, 3, 1, 1),
-        (128, 3, 1, 1),
-        (128, 3, 1, 1),
+        (256, 3, 1, 1),
+        (256, 3, 1, 1),
+        (256, 3, 1, 1),
+        (256, 3, 1, 1),
     ]
 
     configs = []

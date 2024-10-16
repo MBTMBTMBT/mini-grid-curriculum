@@ -824,8 +824,8 @@ if __name__ == '__main__':
     movement_augmentation = 5
 
     encoder_decoder_net_arch = [
-        (128, 3, 2, 1),
-        (128, 3, 2, 1),
+        (32, 3, 2, 1),
+        (64, 3, 2, 1),
         (128, 3, 1, 1),
         (128, 3, 1, 1),
     ]

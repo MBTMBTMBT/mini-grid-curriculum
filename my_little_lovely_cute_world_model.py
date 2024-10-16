@@ -586,7 +586,7 @@ if __name__ == '__main__':
     session_dir = r"./experiments/world_model-door_key-7"
     dataset_samples = int(2e4)
     dataset_repeat_each_epoch = 5
-    num_epochs = 20
+    num_epochs = 30
     batch_size = 32
     lr = 1e-4
     discriminator_lr=5e-5
@@ -663,12 +663,20 @@ if __name__ == '__main__':
         discriminator_lr=discriminator_lr,
     ).to(device)
 
-    for epoch in range(num_epochs):
+    min_loss = float('inf')
+    start_epoch = 0
+    try:
+        _, min_loss = world_model.load_model(save_dir=os.path.join(session_dir, 'models'), best=True)
+        start_epoch, _ = world_model.load_model(save_dir=os.path.join(session_dir, 'models'))
+        start_epoch += 1
+    except FileNotFoundError:
+        pass
+
+    for epoch in range(start_epoch, num_epochs):
         print(f"Start epoch {epoch + 1} / {num_epochs}:")
         print("Resampling dataset...")
         dataset.resample()
         print("Starting training...")
-        min_loss = float('inf')
         loss, _ = world_model.train_epoch(
             dataloader,
             log_writer,
@@ -676,5 +684,5 @@ if __name__ == '__main__':
         )
         if loss < min_loss:
             min_loss = loss
-            world_model.save_model(epoch, loss, is_best=True)
-        world_model.save_model(epoch, loss)
+            world_model.save_model(epoch, loss, is_best=True, save_dir=os.path.join(session_dir, 'models'))
+        world_model.save_model(epoch, loss, save_dir=os.path.join(session_dir, 'models'))

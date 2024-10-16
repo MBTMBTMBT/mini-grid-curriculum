@@ -179,7 +179,7 @@ class ComparisonDiscriminator(nn.Module):
         # Fully connected layer that outputs a scalar, representing the probability of the image pair being "real"
         self.fc = nn.Sequential(
             nn.Linear(flattened_size, 1),  # Input is the channel count after global average pooling
-            nn.Sigmoid()  # Output range is [0, 1]
+            # nn.Sigmoid()  # Output range is [0, 1]
         )
 
     def _get_flattened_size(self, input_shape, conv_arch):
@@ -520,7 +520,7 @@ class WorldModel(nn.Module):
         )
 
         # Loss functions
-        self.adversarial_loss = nn.BCELoss()
+        self.adversarial_loss = nn.MSELoss()  # nn.BCELoss()
         self.mse_loss = nn.MSELoss()
         self.mae_loss = nn.L1Loss()
 
@@ -681,7 +681,7 @@ class WorldModel(nn.Module):
         reconstruction_loss = reconstruction_loss_mse + reconstruction_loss_mae
 
         # Combine the losses with the given weights
-        generator_loss = 0.75 * reconstruction_loss + 0.25 * adversarial_loss
+        generator_loss = 0.5 * reconstruction_loss + 0.5 * adversarial_loss
 
         # --------------------
         # VAE Loss (Reconstruction + KL Divergence)
@@ -816,16 +816,17 @@ if __name__ == '__main__':
     num_epochs = 50
     batch_size = 8
     lr = 1e-4
-    discriminator_lr=0.25e-4
+    discriminator_lr = 1e-4
 
-    latent_shape = (32, 32, 32)  # channel, height, width
-    num_homomorphism_channels = 28
+    latent_shape = (128, 32, 32)  # channel, height, width
+    num_homomorphism_channels = 96
 
     movement_augmentation = 5
 
     encoder_decoder_net_arch = [
-        (32, 3, 2, 1),
-        (64, 3, 2, 1),
+        (128, 3, 2, 1),
+        (128, 3, 2, 1),
+        (128, 3, 1, 1),
         (128, 3, 1, 1),
     ]
 
@@ -836,6 +837,7 @@ if __name__ == '__main__':
     ]
 
     transition_model_conv_arch = [
+        (128, 3, 1, 1),
         (128, 3, 1, 1),
         (128, 3, 1, 1),
         (128, 3, 1, 1),

@@ -475,16 +475,26 @@ class WorldModel(nn.Module):
             = self.transition_model(homo_latent_state, action)
 
         # Make homomorphism next state
-        predicted_next_state = torch.cat([predicted_next_homo_latent_state, latent_state[:, self.num_homomorphism_channels:, :, :]], dim=1)
+        predicted_latent_next_state = torch.cat(
+            [predicted_next_homo_latent_state,
+             latent_state[:, self.num_homomorphism_channels:, :, :]],
+            dim=1,
+        )
+        latent_next_state = torch.cat(
+            [homo_latent_next_state,
+             latent_state[:, self.num_homomorphism_channels:, :, :]],
+            dim=1,
+        )  # still use the obs layers from the first observation
 
         # Reconstruct the state and predicted next state
-        reconstructed_state = self.decoder(latent_state)
-        reconstructed_next_state = self.decoder(predicted_next_state)
+        # reconstructed_state = self.decoder(latent_state)
+        reconstructed_next_state = self.decoder(latent_next_state)
+        reconstructed_predicted_next_state = self.decoder(predicted_latent_next_state)
 
         # **Resize the states** to match the size of the reconstructed state
-        resized_state = F.interpolate(state, size=reconstructed_state.shape[2:], mode='bilinear',
-                                           align_corners=False)
-        resized_next_state = F.interpolate(next_state, size=reconstructed_next_state.shape[2:], mode='bilinear',
+        # resized_state = F.interpolate(state, size=reconstructed_state.shape[2:], mode='bilinear',
+        #                                    align_corners=False)
+        resized_next_state = F.interpolate(next_state, size=reconstructed_predicted_next_state.shape[2:], mode='bilinear',
                                            align_corners=False)
 
         # --------------------
@@ -498,11 +508,12 @@ class WorldModel(nn.Module):
         # fake_outputs = self.discriminator(reconstructed_next_state.detach())
         # Train the discriminator using real and fake (reconstructed) image pairs
 
+        # Use both reconstructed images here so that the discriminator mainly focus on transitions
         real_outputs = self.discriminator(
-            resized_next_state, resized_next_state,
+            reconstructed_next_state, reconstructed_next_state,
         )  # Real image compared with itself
         fake_outputs = self.discriminator(
-            resized_next_state, reconstructed_next_state.detach(),
+            reconstructed_next_state, reconstructed_predicted_next_state.detach(),
         )  # Real vs. Reconstructed
 
         d_real_loss = self.adversarial_loss(real_outputs, real_labels)
@@ -518,12 +529,12 @@ class WorldModel(nn.Module):
         # --------------------
         # Try to fool the discriminator with the generated image
         # g_fake_outputs = self.discriminator(reconstructed_next_state)
-        g_fake_outputs = self.discriminator(resized_next_state, reconstructed_next_state)  # Real vs. Reconstructed
+        g_fake_outputs = self.discriminator(reconstructed_next_state, reconstructed_predicted_next_state)  # Real vs. Reconstructed
         adversarial_loss = self.adversarial_loss(g_fake_outputs, real_labels)
 
         # Compute reconstruction loss (MSE) between the reconstructed and resized next state
-        reconstruction_loss_mse = self.mse_loss(reconstructed_next_state, resized_next_state)
-        reconstruction_loss_mae = self.mae_loss(reconstructed_next_state, resized_next_state)
+        reconstruction_loss_mse = self.mse_loss(reconstructed_predicted_next_state, resized_next_state)
+        reconstruction_loss_mae = self.mae_loss(reconstructed_predicted_next_state, resized_next_state)
         reconstruction_loss = reconstruction_loss_mse + reconstruction_loss_mae
 
         # Combine the losses with the given weights
@@ -662,7 +673,7 @@ if __name__ == '__main__':
     num_epochs = 30
     batch_size = 32
     lr = 1e-4
-    discriminator_lr=5e-5
+    discriminator_lr=1e-4
 
     latent_shape = (16, 32, 32)  # channel, height, width
     num_homomorphism_channels = 12

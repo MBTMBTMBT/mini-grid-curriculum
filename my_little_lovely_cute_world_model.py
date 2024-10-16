@@ -499,7 +499,7 @@ class WorldModel(nn.Module):
         self.encoder = Encoder(obs_shape, latent_shape, cnn_net_arch)
         self.decoder = Decoder(latent_shape, obs_shape, cnn_net_arch)
         self.transition_model = TransitionModelVAE(self.homomorphism_latent_space, num_actions, transition_model_conv_arch)
-        # self.image_discriminator = ComparisonDiscriminator(obs_shape, disc_conv_arch)
+        self.image_discriminator = ComparisonDiscriminator(obs_shape, disc_conv_arch)
         # self.transition_discriminator = ComparisonDiscriminator(obs_shape, disc_conv_arch)
 
         self.num_actions = num_actions
@@ -513,11 +513,11 @@ class WorldModel(nn.Module):
         )
 
         # Separate optimizer for the discriminator
-        # self.discriminator_optimizer = optim.Adam(
-        #     list(self.transition_discriminator.parameters()) +
-        #     list(self.image_discriminator.parameters()),
-        #     lr=discriminator_lr
-        # )
+        self.discriminator_optimizer = optim.Adam(
+            # list(self.transition_discriminator.parameters()) +
+            list(self.image_discriminator.parameters()),
+            lr=discriminator_lr
+        )
 
         # Loss functions
         self.adversarial_loss = nn.BCELoss()
@@ -561,7 +561,7 @@ class WorldModel(nn.Module):
             'epoch': epoch,
             'model_state_dict': self.state_dict(),
             'optimizer_state_dict': self.optimizer.state_dict(),
-            # 'discriminator_optimizer_state_dict': self.discriminator_optimizer.state_dict(),
+            'discriminator_optimizer_state_dict': self.discriminator_optimizer.state_dict(),
             'loss': loss,
         }
 
@@ -580,7 +580,7 @@ class WorldModel(nn.Module):
             checkpoint = torch.load(checkpoint_path)
             self.load_state_dict(checkpoint['model_state_dict'])
             self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-            # self.discriminator_optimizer.load_state_dict(checkpoint['discriminator_optimizer_state_dict'])
+            self.discriminator_optimizer.load_state_dict(checkpoint['discriminator_optimizer_state_dict'])
             epoch = checkpoint['epoch']
             loss = checkpoint['loss']
             print(f"Loaded {'best' if best else 'latest'} model checkpoint from epoch {epoch} with loss {loss:.4f}")
@@ -632,22 +632,22 @@ class WorldModel(nn.Module):
         resized_next_state = F.interpolate(next_state, size=reconstructed_predicted_next_state.shape[2:], mode='bilinear',
                                            align_corners=False)
 
-        # # --------------------
-        # # Discriminator Training
-        # # --------------------
-        # real_labels = torch.ones(state.size(0), 1).to(device)
-        # fake_labels = torch.zeros(state.size(0), 1).to(device)
+        # --------------------
+        # Discriminator Training
+        # --------------------
+        real_labels = torch.ones(state.size(0), 1).to(device)
+        fake_labels = torch.zeros(state.size(0), 1).to(device)
 
-        # # Train discriminator on real and fake images
-        # real_outputs = self.image_discriminator(
-        #     resized_next_state, resized_next_state,
-        # )
-        # fake_outputs = self.image_discriminator(
-        #     resized_next_state, reconstructed_next_state.detach(),
-        # )
-        # d_real_loss = self.adversarial_loss(real_outputs, real_labels)
-        # d_fake_loss = self.adversarial_loss(fake_outputs, fake_labels)
-        # discriminator_loss = (d_real_loss + d_fake_loss) / 2
+        # Train discriminator on real and fake images
+        real_outputs = self.image_discriminator(
+            resized_next_state, resized_next_state,
+        )
+        fake_outputs = self.image_discriminator(
+            resized_next_state, reconstructed_predicted_next_state.detach(),
+        )
+        d_real_loss = self.adversarial_loss(real_outputs, real_labels)
+        d_fake_loss = self.adversarial_loss(fake_outputs, fake_labels)
+        discriminator_loss = (d_real_loss + d_fake_loss) / 2
         #
         # # Train the comparison discriminator using real and fake (reconstructed) image pairs
         # # Use both reconstructed images here so that the discriminator mainly focus on transitions
@@ -661,17 +661,17 @@ class WorldModel(nn.Module):
         # d_real_loss = self.adversarial_loss(real_outputs, real_labels)
         # d_fake_loss = self.adversarial_loss(fake_outputs, fake_labels)
         # discriminator_loss += (d_real_loss + d_fake_loss) / 2
-        #
-        # self.discriminator_optimizer.zero_grad()
-        # discriminator_loss.backward()
-        # self.discriminator_optimizer.step()
+
+        self.discriminator_optimizer.zero_grad()
+        discriminator_loss.backward()
+        self.discriminator_optimizer.step()
 
         # --------------------
         # Generator (Decoder) Loss
         # --------------------
-        # # Try to fool the discriminator with the generated image
-        # g_fake_outputs = self.image_discriminator(resized_next_state, reconstructed_next_state)
-        # adversarial_loss = 0.5 * self.adversarial_loss(g_fake_outputs, real_labels)
+        # Try to fool the discriminator with the generated image
+        g_fake_outputs = self.image_discriminator(resized_next_state, reconstructed_predicted_next_state)
+        adversarial_loss = self.adversarial_loss(g_fake_outputs, real_labels)
         # g_fake_outputs = self.transition_discriminator(reconstructed_next_state.detach(), reconstructed_predicted_next_state)  # Real vs. Reconstructed
         # adversarial_loss += 0.5 * self.adversarial_loss(g_fake_outputs, real_labels)
 
@@ -681,7 +681,7 @@ class WorldModel(nn.Module):
         reconstruction_loss = reconstruction_loss_mse + reconstruction_loss_mae
 
         # Combine the losses with the given weights
-        generator_loss = reconstruction_loss  # 0.75 * reconstruction_loss + 0.25 * adversarial_loss
+        generator_loss = 0.75 * reconstruction_loss + 0.25 * adversarial_loss
 
         # --------------------
         # VAE Loss (Reconstruction + KL Divergence)
@@ -715,7 +715,7 @@ class WorldModel(nn.Module):
 
         # Return a dictionary with all the loss values
         loss_dict = {
-            # "discriminator_loss": discriminator_loss.detach().cpu().item(),
+            "discriminator_loss": discriminator_loss.detach().cpu().item(),
             "generator_loss": generator_loss.detach().cpu().item(),
             "vae_loss": vae_loss.detach().cpu().item(),
             "latent_transition_loss": latent_transition_loss.detach().cpu().item(),
@@ -816,7 +816,7 @@ if __name__ == '__main__':
     num_epochs = 50
     batch_size = 8
     lr = 1e-4
-    discriminator_lr=1e-4
+    discriminator_lr=0.25e-4
 
     latent_shape = (32, 32, 32)  # channel, height, width
     num_homomorphism_channels = 28

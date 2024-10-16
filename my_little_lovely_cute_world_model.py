@@ -510,10 +510,10 @@ class WorldModel(nn.Module):
 
         # Use both reconstructed images here so that the discriminator mainly focus on transitions
         real_outputs = self.discriminator(
-            reconstructed_next_state, reconstructed_next_state,
+            reconstructed_next_state.detach(), reconstructed_next_state.detach(),
         )  # Real image compared with itself
         fake_outputs = self.discriminator(
-            reconstructed_next_state, reconstructed_predicted_next_state.detach(),
+            reconstructed_next_state.detach(), reconstructed_predicted_next_state.detach(),
         )  # Real vs. Reconstructed
 
         d_real_loss = self.adversarial_loss(real_outputs, real_labels)
@@ -529,7 +529,7 @@ class WorldModel(nn.Module):
         # --------------------
         # Try to fool the discriminator with the generated image
         # g_fake_outputs = self.discriminator(reconstructed_next_state)
-        g_fake_outputs = self.discriminator(reconstructed_next_state, reconstructed_predicted_next_state)  # Real vs. Reconstructed
+        g_fake_outputs = self.discriminator(reconstructed_next_state.detach(), reconstructed_predicted_next_state)  # Real vs. Reconstructed
         adversarial_loss = self.adversarial_loss(g_fake_outputs, real_labels)
 
         # Compute reconstruction loss (MSE) between the reconstructed and resized next state

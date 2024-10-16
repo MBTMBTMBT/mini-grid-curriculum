@@ -526,7 +526,7 @@ class WorldModel(nn.Module):
 
     def forward(self, state, action):
         device = next(self.parameters()).device
-        state = (state / 255.0).to(device)
+        state = state.to(device)
         action = action.to(device)
 
         # Encode the current and next state
@@ -551,7 +551,7 @@ class WorldModel(nn.Module):
         resized_next_state = F.interpolate(reconstructed_state, size=reconstructed_state.shape[2:], mode='bilinear',
                                            align_corners=False)
 
-        return resized_next_state * 255.0, predicted_reward, predicted_done
+        return resized_next_state, predicted_reward, predicted_done
 
     def save_model(self, epoch, loss, save_dir='models', is_best=False):
         if not os.path.exists(save_dir):
@@ -590,10 +590,10 @@ class WorldModel(nn.Module):
 
     def train_minibatch(self, state, action, reward, next_state, done):
         device = next(self.parameters()).device
-        state = (state / 255.0).to(device)
+        state = state.to(device)
         action = action.to(device)
         reward = reward.to(device)
-        next_state = (next_state / 255.0).to(device)
+        next_state = next_state.to(device)
         done = done.to(device)
 
         # Encode the current and next state

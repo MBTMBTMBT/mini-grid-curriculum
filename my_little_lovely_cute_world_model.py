@@ -533,7 +533,7 @@ class WorldModel(nn.Module):
         # Generator (Decoder) Loss
         # --------------------
         # Try to fool the discriminator with the generated image
-        g_fake_outputs = self.discriminator(reconstructed_next_state)
+        g_fake_outputs = self.discriminator(reconstructed_predicted_next_state)
         adversarial_loss = 0.25 * self.adversarial_loss(g_fake_outputs, real_labels)
         g_fake_outputs = self.comparison_discriminator(reconstructed_next_state.detach(), reconstructed_predicted_next_state)  # Real vs. Reconstructed
         adversarial_loss += 0.75 * self.adversarial_loss(g_fake_outputs, real_labels)

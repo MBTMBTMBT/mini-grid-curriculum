@@ -101,6 +101,54 @@ class Decoder(nn.Module):
         return self.decoder(latent_state)
 
 
+# class Discriminator(nn.Module):
+#     def __init__(self, input_shape, conv_arch):
+#         """
+#         :param input_shape: Shape of the input image (channels, height, width)
+#         :param conv_arch: Architecture of the convolutional layers for the discriminator
+#         """
+#         super(Discriminator, self).__init__()
+#         channels, height, width = input_shape
+#
+#         # Convolutional layers architecture for the discriminator
+#         conv_layers = []
+#         in_channels = channels
+#         for out_channels, kernel_size, stride, padding in conv_arch:
+#             conv_layers.append(nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding))
+#             conv_layers.append(nn.LeakyReLU(0.2))
+#             in_channels = out_channels
+#
+#         self.conv_layers = nn.Sequential(*conv_layers)
+#
+#         # Global average pooling to reduce the feature map to (batch_size, out_channels, 1, 1)
+#         self.global_avg_pool = nn.AdaptiveAvgPool2d(1)
+#
+#         # Calculate flattened size dynamically using a dummy input
+#         flattened_size = self._get_flattened_size(input_shape, conv_arch)
+#
+#         # Fully connected layer that outputs a scalar, representing the probability of the image being "real"
+#         self.fc = nn.Sequential(
+#             nn.Linear(flattened_size, 1),  # Input is the channel count after global average pooling
+#             nn.Sigmoid()  # Output range is [0, 1]
+#         )
+#
+#     def _get_flattened_size(self, input_shape, conv_arch):
+#         """
+#         Dynamically calculate the flattened size based on the given convolutional architecture and input shape
+#         """
+#         # Create a dummy input tensor
+#         sample_tensor = torch.zeros(1, *input_shape)  # Assuming batch_size = 1
+#         sample_tensor = self.conv_layers(sample_tensor)
+#         sample_tensor = self.global_avg_pool(sample_tensor)
+#         return sample_tensor.numel()  # Return the flattened size
+#
+#     def forward(self, x):
+#         x = self.conv_layers(x)  # Process through convolutional layers
+#         x = self.global_avg_pool(x)  # Global average pooling (batch_size, out_channels, 1, 1)
+#         x = torch.flatten(x, 1)  # Flatten to (batch_size, out_channels)
+#         return self.fc(x)
+
+
 class Discriminator(nn.Module):
     def __init__(self, input_shape, conv_arch):
         """
@@ -110,9 +158,11 @@ class Discriminator(nn.Module):
         super(Discriminator, self).__init__()
         channels, height, width = input_shape
 
-        # Convolutional layers architecture for the discriminator
+        # The input will consist of the real and reconstructed images concatenated along the channel dimension
+        in_channels = channels * 2
+
+        # Convolutional layers for processing the concatenated real and fake images
         conv_layers = []
-        in_channels = channels
         for out_channels, kernel_size, stride, padding in conv_arch:
             conv_layers.append(nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding))
             conv_layers.append(nn.LeakyReLU(0.2))
@@ -126,7 +176,7 @@ class Discriminator(nn.Module):
         # Calculate flattened size dynamically using a dummy input
         flattened_size = self._get_flattened_size(input_shape, conv_arch)
 
-        # Fully connected layer that outputs a scalar, representing the probability of the image being "real"
+        # Fully connected layer that outputs a scalar, representing the probability of the image pair being "real"
         self.fc = nn.Sequential(
             nn.Linear(flattened_size, 1),  # Input is the channel count after global average pooling
             nn.Sigmoid()  # Output range is [0, 1]
@@ -136,16 +186,30 @@ class Discriminator(nn.Module):
         """
         Dynamically calculate the flattened size based on the given convolutional architecture and input shape
         """
-        # Create a dummy input tensor
-        sample_tensor = torch.zeros(1, *input_shape)  # Assuming batch_size = 1
+        # Create a dummy input tensor, with doubled channels (real + reconstructed images)
+        sample_tensor = torch.zeros(1, input_shape[0] * 2, input_shape[1], input_shape[2])  # Assuming batch_size = 1
         sample_tensor = self.conv_layers(sample_tensor)
         sample_tensor = self.global_avg_pool(sample_tensor)
         return sample_tensor.numel()  # Return the flattened size
 
-    def forward(self, x):
-        x = self.conv_layers(x)  # Process through convolutional layers
-        x = self.global_avg_pool(x)  # Global average pooling (batch_size, out_channels, 1, 1)
-        x = torch.flatten(x, 1)  # Flatten to (batch_size, out_channels)
+    def forward(self, real_image, reconstructed_image):
+        """
+        Forward pass through the discriminator.
+        :param real_image: The real image from the environment (batch_size, channels, height, width)
+        :param reconstructed_image: The reconstructed image from the generator (batch_size, channels, height, width)
+        :return: The probability that the image pair is real
+        """
+        # Concatenate real and reconstructed images along the channel dimension
+        combined_input = torch.cat([real_image, reconstructed_image], dim=1)  # (batch_size, 2*channels, height, width)
+
+        # Process through convolutional layers
+        x = self.conv_layers(combined_input)
+
+        # Global average pooling
+        x = self.global_avg_pool(x)
+
+        # Flatten and pass through the fully connected layer to get the probability
+        x = torch.flatten(x, 1)
         return self.fc(x)
 
 
@@ -429,9 +493,17 @@ class WorldModel(nn.Module):
         real_labels = torch.ones(state.size(0), 1).to(device)
         fake_labels = torch.zeros(state.size(0), 1).to(device)
 
-        # Train discriminator on real and fake images
-        real_outputs = self.discriminator(resized_next_state)
-        fake_outputs = self.discriminator(reconstructed_next_state.detach())
+        # # Train discriminator on real and fake images
+        # real_outputs = self.discriminator(resized_next_state)
+        # fake_outputs = self.discriminator(reconstructed_next_state.detach())
+        # Train the discriminator using real and fake (reconstructed) image pairs
+
+        real_outputs = self.discriminator(
+            resized_next_state, resized_next_state,
+        )  # Real image compared with itself
+        fake_outputs = self.discriminator(
+            resized_next_state, reconstructed_next_state.detach(),
+        )  # Real vs. Reconstructed
 
         d_real_loss = self.adversarial_loss(real_outputs, real_labels)
         d_fake_loss = self.adversarial_loss(fake_outputs, fake_labels)
@@ -445,7 +517,8 @@ class WorldModel(nn.Module):
         # Generator (Decoder) Loss
         # --------------------
         # Try to fool the discriminator with the generated image
-        g_fake_outputs = self.discriminator(reconstructed_next_state)
+        # g_fake_outputs = self.discriminator(reconstructed_next_state)
+        g_fake_outputs = self.discriminator(resized_next_state, reconstructed_next_state)  # Real vs. Reconstructed
         adversarial_loss = self.adversarial_loss(g_fake_outputs, real_labels)
 
         # Compute reconstruction loss (MSE) between the reconstructed and resized next state
@@ -453,8 +526,8 @@ class WorldModel(nn.Module):
         reconstruction_loss_mae = self.mae_loss(reconstructed_next_state, resized_next_state)
         reconstruction_loss = reconstruction_loss_mse + reconstruction_loss_mae
 
-        # Combine the losses with the given weights (0.9 for MSE, 0.1 for adversarial)
-        generator_loss = 0.9 * reconstruction_loss + 0.1 * adversarial_loss
+        # Combine the losses with the given weights
+        generator_loss = 0.5 * reconstruction_loss + 0.5 * adversarial_loss
 
         # --------------------
         # VAE Loss (Reconstruction + KL Divergence)

@@ -432,7 +432,7 @@ class WorldModel(nn.Module):
             'epoch': epoch,
             'model_state_dict': self.state_dict(),
             'optimizer_state_dict': self.optimizer.state_dict(),
-            'discriminator_optimizer_state_dict': self.discriminator_optimizer.state_dict(),
+            # 'discriminator_optimizer_state_dict': self.discriminator_optimizer.state_dict(),
             'loss': loss,
         }
 
@@ -451,7 +451,7 @@ class WorldModel(nn.Module):
             checkpoint = torch.load(checkpoint_path)
             self.load_state_dict(checkpoint['model_state_dict'])
             self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-            self.discriminator_optimizer.load_state_dict(checkpoint['discriminator_optimizer_state_dict'])
+            # self.discriminator_optimizer.load_state_dict(checkpoint['discriminator_optimizer_state_dict'])
             epoch = checkpoint['epoch']
             loss = checkpoint['loss']
             print(f"Loaded {'best' if best else 'latest'} model checkpoint from epoch {epoch} with loss {loss:.4f}")
@@ -682,21 +682,22 @@ if __name__ == '__main__':
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     session_dir = r"./experiments/world_model-door_key-7"
-    dataset_samples = int(2e4)
+    dataset_samples = int(1e4)
     dataset_repeat_each_epoch = 5
-    num_epochs = 30
-    batch_size = 32
+    num_epochs = 50
+    batch_size = 16
     lr = 1e-4
     discriminator_lr=1e-4
 
-    latent_shape = (16, 32, 32)  # channel, height, width
-    num_homomorphism_channels = 12
+    latent_shape = (32, 32, 32)  # channel, height, width
+    num_homomorphism_channels = 28
+
+    movement_augmentation = 5
 
     encoder_decoder_net_arch = [
         (64, 3, 2, 1),
         (128, 3, 2, 1),
         (256, 3, 1, 1),
-        (512, 3, 1, 1),
     ]
 
     disc_conv_arch = [
@@ -740,7 +741,7 @@ if __name__ == '__main__':
         for each_task_config in configs
     ])
 
-    dataset = GymDataset(venv, data_size=dataset_samples, repeat=dataset_repeat_each_epoch, movement_augmentation=3)
+    dataset = GymDataset(venv, data_size=dataset_samples, repeat=dataset_repeat_each_epoch, movement_augmentation=movement_augmentation)
     print(len(dataset))
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, drop_last=True)
     print(len(dataloader))

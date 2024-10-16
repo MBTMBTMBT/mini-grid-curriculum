@@ -213,6 +213,143 @@ class ComparisonDiscriminator(nn.Module):
         return self.fc(x)
 
 
+# class TransitionModelVAE(nn.Module):
+#     def __init__(self, latent_shape, action_dim, conv_arch):
+#         """
+#         :param latent_shape: Shape of the latent space (channels, height, width)
+#         :param action_dim: Dimensionality of the action space (one-hot encoded)
+#         :param conv_arch: Convolutional network architecture for the encoder, e.g., [(64, 4, 2, 1), (128, 4, 2, 1)]
+#         """
+#         super(TransitionModelVAE, self).__init__()
+#         latent_channels, latent_height, latent_width = latent_shape
+#
+#         # Instead of action embedding, treat action as extra channels
+#         self.action_dim = action_dim
+#
+#         # Convolutional layers for merging the action (as extra channels) and latent state
+#         conv_layers = []
+#         in_channels = latent_channels + action_dim  # Action channels are directly concatenated
+#         for out_channels, kernel_size, stride, padding in conv_arch:
+#             conv_layers.append(nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding))
+#             conv_layers.append(nn.LeakyReLU(0.2))
+#             in_channels = out_channels
+#
+#         self.conv_encoder = nn.Sequential(*conv_layers)
+#
+#         # Dynamically calculate the flattened size after the convolutional layers
+#         self.output_shape = self._get_output_shape(latent_shape, conv_arch)
+#
+#         # More complex conv_mean and conv_logvar layers (with padding and stride 1 to keep size constant)
+#         self.conv_mean = nn.Sequential(
+#             nn.Conv2d(self.output_shape[0], self.output_shape[0], kernel_size=3, padding=1),
+#             nn.LeakyReLU(0.2),
+#             nn.Conv2d(self.output_shape[0], self.output_shape[0], kernel_size=3, padding=1),
+#             nn.LeakyReLU(0.2),
+#             nn.Conv2d(self.output_shape[0], self.output_shape[0], kernel_size=3, padding=1)
+#         )
+#
+#         self.conv_logvar = nn.Sequential(
+#             nn.Conv2d(self.output_shape[0], self.output_shape[0], kernel_size=3, padding=1),
+#             nn.LeakyReLU(0.2),
+#             nn.Conv2d(self.output_shape[0], self.output_shape[0], kernel_size=3, padding=1),
+#             nn.LeakyReLU(0.2),
+#             nn.Conv2d(self.output_shape[0], self.output_shape[0], kernel_size=3, padding=1)
+#         )
+#
+#         # Generate deconv architecture automatically by reversing conv_arch
+#         deconv_arch = self._create_deconv_arch(conv_arch, latent_channels)
+#
+#         # Deconvolutional layers to decode the latent representation back to the original shape
+#         deconv_layers = []
+#         in_channels = self.output_shape[0]
+#         for out_channels, kernel_size, stride, padding in deconv_arch:
+#             deconv_layers.append(nn.ConvTranspose2d(in_channels, out_channels, kernel_size, stride, padding))
+#             deconv_layers.append(nn.LeakyReLU(0.2))
+#             in_channels = out_channels
+#
+#         self.deconv_decoder = nn.Sequential(*deconv_layers)
+#
+#         # Reward predictor
+#         self.reward_predictor = nn.Sequential(
+#             nn.Linear(self.output_shape[0] * self.output_shape[1] * self.output_shape[2], 256),
+#             nn.LeakyReLU(0.2),
+#             nn.Linear(256, 1)  # Predict reward, output a scalar
+#         )
+#
+#         # Done predictor
+#         self.done_predictor = nn.Sequential(
+#             nn.Linear(self.output_shape[0] * self.output_shape[1] * self.output_shape[2], 256),
+#             nn.LeakyReLU(0.2),
+#             nn.Linear(256, 1),
+#             nn.Sigmoid()
+#         )
+#
+#     def _get_output_shape(self, latent_shape, conv_arch):
+#         """
+#         Dynamically calculate the output shape based on the given convolutional architecture and input shape.
+#         """
+#         # Assume batch_size = 1, create a dummy input
+#         sample_tensor = torch.zeros(1, latent_shape[0] + self.action_dim, latent_shape[1], latent_shape[2]).to(next(self.parameters()).device)  # Extra action channels added
+#         sample_tensor = self.conv_encoder(sample_tensor)
+#         output_shape = sample_tensor.shape[1:]  # Shape after conv layers, excluding batch size
+#         return output_shape
+#
+#     def _create_deconv_arch(self, conv_arch, latent_channels):
+#         """
+#         Create deconv architecture by reversing the conv_arch with suitable modifications.
+#         The kernel_size, stride, and padding are the same, but reversed to recover the original dimensions.
+#         Ensure that the final layer outputs latent_channels.
+#         """
+#         deconv_arch = []
+#         for i, (out_channels, kernel_size, stride, padding) in enumerate(reversed(conv_arch)):
+#             # If it's the last layer, ensure that the output channels match latent_channels
+#             if i == len(conv_arch) - 1:
+#                 out_channels = latent_channels
+#             deconv_arch.append((out_channels, kernel_size, stride, padding))
+#         return deconv_arch
+#
+#     def forward(self, latent_state, action):
+#         """
+#         :param latent_state: (batch_size, latent_channels, latent_height, latent_width)
+#         :param action: (batch_size, action_dim), one-hot encoded action
+#         :return: z_next: Next latent state, mean: Mean of the latent distribution, logvar: Log variance, reward_pred: Predicted reward, done_pred: Predicted done state
+#         """
+#         batch_size, latent_channels, latent_height, latent_width = latent_state.shape
+#
+#         # Reshape action to (batch_size, action_dim, 1, 1) and then expand it to (batch_size, action_dim, latent_height, latent_width)
+#         action_reshaped = action.view(batch_size, self.action_dim, 1, 1)
+#         action_reshaped = action_reshaped.expand(batch_size, self.action_dim, latent_height, latent_width)
+#
+#         # Concatenate action and latent state
+#         x = torch.cat([latent_state, action_reshaped], dim=1)  # Action channels concatenated at the end
+#
+#         # Process through the convolutional encoder
+#         x = self.conv_encoder(x)
+#
+#         # Generate mean and logvar using more complex convolution layers
+#         mean = self.conv_mean(x)
+#         logvar = self.conv_logvar(x)
+#
+#         # Reparameterization trick
+#         std = torch.exp(0.5 * logvar)
+#         eps = torch.randn_like(std)
+#         z_next = mean + eps * std
+#
+#         # Decode the latent vector back to the original latent state shape using deconv layers
+#         z_next_decoded = self.deconv_decoder(z_next)
+#
+#         # Flatten for reward and done prediction
+#         x_flat = x.view(batch_size, -1)
+#
+#         # Predict reward
+#         reward_pred = self.reward_predictor(x_flat)
+#
+#         # Predict done
+#         done_pred = self.done_predictor(x_flat)
+#
+#         return z_next_decoded, mean, logvar, reward_pred, done_pred
+
+
 class TransitionModelVAE(nn.Module):
     def __init__(self, latent_shape, action_dim, conv_arch):
         """
@@ -239,22 +376,11 @@ class TransitionModelVAE(nn.Module):
         # Dynamically calculate the flattened size after the convolutional layers
         self.output_shape = self._get_output_shape(latent_shape, conv_arch)
 
-        # More complex conv_mean and conv_logvar layers (with padding and stride 1 to keep size constant)
-        self.conv_mean = nn.Sequential(
-            nn.Conv2d(self.output_shape[0], self.output_shape[0], kernel_size=3, padding=1),
-            nn.LeakyReLU(0.2),
-            nn.Conv2d(self.output_shape[0], self.output_shape[0], kernel_size=3, padding=1),
-            nn.LeakyReLU(0.2),
-            nn.Conv2d(self.output_shape[0], self.output_shape[0], kernel_size=3, padding=1)
-        )
+        # Single conv layer to generate both mean and logvar (2 * channels)
+        self.conv_mean_logvar = nn.Conv2d(self.output_shape[0], self.output_shape[0] * 2, kernel_size=3, padding=1)
 
-        self.conv_logvar = nn.Sequential(
-            nn.Conv2d(self.output_shape[0], self.output_shape[0], kernel_size=3, padding=1),
-            nn.LeakyReLU(0.2),
-            nn.Conv2d(self.output_shape[0], self.output_shape[0], kernel_size=3, padding=1),
-            nn.LeakyReLU(0.2),
-            nn.Conv2d(self.output_shape[0], self.output_shape[0], kernel_size=3, padding=1)
-        )
+        # Adaptive pooling to collapse spatial dimensions for variance if needed
+        self.adaptive_pool = nn.AdaptiveAvgPool2d((1, 1))
 
         # Generate deconv architecture automatically by reversing conv_arch
         deconv_arch = self._create_deconv_arch(conv_arch, latent_channels)
@@ -326,9 +452,12 @@ class TransitionModelVAE(nn.Module):
         # Process through the convolutional encoder
         x = self.conv_encoder(x)
 
-        # Generate mean and logvar using more complex convolution layers
-        mean = self.conv_mean(x)
-        logvar = self.conv_logvar(x)
+        # Generate both mean and logvar using a single conv layer (split the output)
+        mean_logvar = self.conv_mean_logvar(x)
+        mean, logvar = torch.split(mean_logvar, self.output_shape[0], dim=1)
+
+        # Generate variance per channel using adaptive pooling if needed
+        logvar = self.adaptive_pool(logvar)
 
         # Reparameterization trick
         std = torch.exp(0.5 * logvar)
@@ -685,7 +814,7 @@ if __name__ == '__main__':
     dataset_samples = int(1e4)
     dataset_repeat_each_epoch = 5
     num_epochs = 50
-    batch_size = 16
+    batch_size = 8
     lr = 1e-4
     discriminator_lr=1e-4
 
@@ -695,22 +824,21 @@ if __name__ == '__main__':
     movement_augmentation = 5
 
     encoder_decoder_net_arch = [
+        (32, 3, 2, 1),
         (64, 3, 2, 1),
-        (128, 3, 2, 1),
-        (256, 3, 1, 1),
+        (128, 3, 1, 1),
     ]
 
     disc_conv_arch = [
+        (32, 3, 2, 1),
         (64, 3, 2, 1),
         (128, 3, 2, 1),
-        (256, 3, 2, 1),
     ]
 
     transition_model_conv_arch = [
-        (256, 3, 1, 1),
-        (256, 3, 1, 1),
-        (256, 3, 1, 1),
-        (256, 3, 1, 1),
+        (128, 3, 1, 1),
+        (128, 3, 1, 1),
+        (128, 3, 1, 1),
     ]
 
     configs = []

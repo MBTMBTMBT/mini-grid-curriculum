@@ -693,7 +693,7 @@ class WorldModel(nn.Module):
         latent_transition_loss = latent_transition_loss_mse + latent_transition_loss_mae
 
         kl_loss = -0.5 * torch.sum(1 + logvar - mean.pow(2) - logvar.exp())
-        vae_loss = kl_loss  # latent_transition_loss + kl_loss
+        vae_loss = latent_transition_loss + kl_loss
 
         # --------------------
         # Reward Prediction Loss
@@ -814,12 +814,12 @@ if __name__ == '__main__':
 
     session_dir = r"./experiments/world_model-door_key-7"
     dataset_samples = int(1e4)
-    dataset_repeat_each_epoch = 10
+    dataset_repeat_each_epoch = 5
     num_epochs = 50
     batch_size = 8
     lr = 1e-4
     discriminator_lr = 1e-4
-    train_discriminator_every_x_epoch=2
+    train_discriminator_every_x_epoch=3
 
     latent_shape = (128, 32, 32)  # channel, height, width
     num_homomorphism_channels = 96

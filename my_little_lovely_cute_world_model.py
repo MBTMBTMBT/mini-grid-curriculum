@@ -59,6 +59,10 @@ class Encoder(nn.Module):
         for out_channels, kernel_size, stride, padding in cnn_net_arch:
             conv_layers.append(nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding))
             conv_layers.append(nn.ReLU())
+
+            # Add a residual block after each Conv2D layer
+            conv_layers.append(ResidualBlock(out_channels))
+
             in_channels = out_channels
 
         # Add the final convolution layer to ensure output channels match latent_channels
@@ -71,6 +75,22 @@ class Encoder(nn.Module):
             x = x.unsqueeze(0)  # Add the batch dimension
         x = self.resize(x)
         return self.encoder(x)
+
+
+class ResidualBlock(nn.Module):
+    def __init__(self, in_channels):
+        super(ResidualBlock, self).__init__()
+        self.conv1 = nn.Conv2d(in_channels, in_channels, kernel_size=3, padding=1)
+        self.relu = nn.ReLU(inplace=True)
+        self.conv2 = nn.Conv2d(in_channels, in_channels, kernel_size=3, padding=1)
+
+    def forward(self, x):
+        residual = x
+        out = self.conv1(x)
+        out = self.relu(out)
+        out = self.conv2(out)
+        out += residual  # Add the input (skip connection)
+        return self.relu(out)
 
 
 class Decoder(nn.Module):
@@ -86,6 +106,10 @@ class Decoder(nn.Module):
         for out_channels, kernel_size, stride, padding in reversed(cnn_net_arch):
             deconv_layers.append(nn.ConvTranspose2d(in_channels, out_channels, kernel_size, stride, padding))
             deconv_layers.append(nn.ReLU())
+
+            # Add a residual block for additional feature extraction
+            deconv_layers.append(ResidualBlock(out_channels))
+
             in_channels = out_channels
 
         # Add the final transposed convolution to ensure output channels match the original image channels
@@ -692,15 +716,14 @@ if __name__ == '__main__':
     discriminator_lr = 1e-4
     train_discriminator_every_x_epoch=3
 
-    latent_shape = (128, 32, 32)  # channel, height, width
-    num_homomorphism_channels = 96
+    latent_shape = (16, 32, 32)  # channel, height, width
+    num_homomorphism_channels = 12
 
-    movement_augmentation = 5
+    movement_augmentation = 2
 
     encoder_decoder_net_arch = [
         (32, 3, 2, 1),
         (64, 3, 2, 1),
-        (128, 3, 1, 1),
         (128, 3, 1, 1),
     ]
 
@@ -711,10 +734,9 @@ if __name__ == '__main__':
     ]
 
     transition_model_conv_arch = [
-        (128, 3, 1, 1),
-        (128, 3, 1, 1),
-        (128, 3, 1, 1),
-        (128, 3, 1, 1),
+        (32, 3, 1, 1),
+        (32, 3, 1, 1),
+        (32, 3, 1, 1),
     ]
 
     configs = []

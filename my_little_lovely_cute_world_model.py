@@ -588,7 +588,7 @@ class WorldModel(nn.Module):
         else:
             raise FileNotFoundError(f"No checkpoint found at {checkpoint_path}")
 
-    def train_minibatch(self, state, action, reward, next_state, done):
+    def train_minibatch(self, state, action, reward, next_state, done, train_discriminator=True):
         device = next(self.parameters()).device
         state = state.to(device)
         action = action.to(device)
@@ -635,36 +635,38 @@ class WorldModel(nn.Module):
         # --------------------
         # Discriminator Training
         # --------------------
-        real_labels = torch.ones(state.size(0), 1).to(device)
-        fake_labels = torch.zeros(state.size(0), 1).to(device)
+        discriminator_loss = torch.tensor(0.0).to(device)
+        if train_discriminator:
+            real_labels = torch.ones(state.size(0), 1).to(device)
+            fake_labels = torch.zeros(state.size(0), 1).to(device)
 
-        # Train discriminator on real and fake images
-        real_outputs = self.image_discriminator(
-            resized_next_state, resized_next_state,
-        )
-        fake_outputs = self.image_discriminator(
-            resized_next_state, reconstructed_predicted_next_state.detach(),
-        )
-        d_real_loss = self.adversarial_loss(real_outputs, real_labels)
-        d_fake_loss = self.adversarial_loss(fake_outputs, fake_labels)
-        discriminator_loss = (d_real_loss + d_fake_loss) / 2
-        #
-        # # Train the comparison discriminator using real and fake (reconstructed) image pairs
-        # # Use both reconstructed images here so that the discriminator mainly focus on transitions
-        # real_outputs = self.transition_discriminator(
-        #     reconstructed_next_state.detach(), reconstructed_next_state.detach(),
-        # )  # Real image compared with itself
-        # fake_outputs = self.transition_discriminator(
-        #     reconstructed_next_state.detach(), reconstructed_predicted_next_state.detach(),
-        # )  # Real vs. Reconstructed
-        #
-        # d_real_loss = self.adversarial_loss(real_outputs, real_labels)
-        # d_fake_loss = self.adversarial_loss(fake_outputs, fake_labels)
-        # discriminator_loss += (d_real_loss + d_fake_loss) / 2
+            # Train discriminator on real and fake images
+            real_outputs = self.image_discriminator(
+                resized_next_state, resized_next_state,
+            )
+            fake_outputs = self.image_discriminator(
+                resized_next_state, reconstructed_predicted_next_state.detach(),
+            )
+            d_real_loss = self.adversarial_loss(real_outputs, real_labels)
+            d_fake_loss = self.adversarial_loss(fake_outputs, fake_labels)
+            discriminator_loss = (d_real_loss + d_fake_loss) / 2
+            #
+            # # Train the comparison discriminator using real and fake (reconstructed) image pairs
+            # # Use both reconstructed images here so that the discriminator mainly focus on transitions
+            # real_outputs = self.transition_discriminator(
+            #     reconstructed_next_state.detach(), reconstructed_next_state.detach(),
+            # )  # Real image compared with itself
+            # fake_outputs = self.transition_discriminator(
+            #     reconstructed_next_state.detach(), reconstructed_predicted_next_state.detach(),
+            # )  # Real vs. Reconstructed
+            #
+            # d_real_loss = self.adversarial_loss(real_outputs, real_labels)
+            # d_fake_loss = self.adversarial_loss(fake_outputs, fake_labels)
+            # discriminator_loss += (d_real_loss + d_fake_loss) / 2
 
-        self.discriminator_optimizer.zero_grad()
-        discriminator_loss.backward()
-        self.discriminator_optimizer.step()
+            self.discriminator_optimizer.zero_grad()
+            discriminator_loss.backward()
+            self.discriminator_optimizer.step()
 
         # --------------------
         # Generator (Decoder) Loss
@@ -681,7 +683,7 @@ class WorldModel(nn.Module):
         reconstruction_loss = reconstruction_loss_mse + reconstruction_loss_mae
 
         # Combine the losses with the given weights
-        generator_loss = 0.5 * reconstruction_loss + 0.5 * adversarial_loss
+        generator_loss = 0.9 * reconstruction_loss + 0.1 * adversarial_loss
 
         # --------------------
         # VAE Loss (Reconstruction + KL Divergence)
@@ -727,13 +729,13 @@ class WorldModel(nn.Module):
 
         return loss_dict
 
-    def train_epoch(self, dataloader: DataLoader, log_writer: SummaryWriter, start_num_batches=0):
+    def train_epoch(self, dataloader: DataLoader, log_writer: SummaryWriter, start_num_batches=0, train_discriminator=True):
         total_samples = len(dataloader) * dataloader.batch_size
         total_loss = 0.0
         with tqdm(total=total_samples, desc="Training", unit="sample") as pbar:
             for i, batch in enumerate(dataloader):
                 obs, actions, next_obs, rewards, dones = batch
-                loss_dict = self.train_minibatch(obs, actions, rewards, next_obs, dones)
+                loss_dict = self.train_minibatch(obs, actions, rewards, next_obs, dones, train_discriminator=train_discriminator)
                 running_loss = loss_dict['total_loss']
                 total_loss += running_loss
                 avg_loss = total_loss / (i + 1)
@@ -812,11 +814,12 @@ if __name__ == '__main__':
 
     session_dir = r"./experiments/world_model-door_key-7"
     dataset_samples = int(1e4)
-    dataset_repeat_each_epoch = 5
+    dataset_repeat_each_epoch = 10
     num_epochs = 50
     batch_size = 8
     lr = 1e-4
     discriminator_lr = 1e-4
+    train_discriminator_every_x_epoch=2
 
     latent_shape = (128, 32, 32)  # channel, height, width
     num_homomorphism_channels = 96
@@ -906,10 +909,15 @@ if __name__ == '__main__':
         print("Resampling dataset...")
         dataset.resample()
         print("Starting training...")
+        if epoch % train_discriminator_every_x_epoch == 0:
+            train_discriminator = True
+        else:
+            train_discriminator = False
         loss, _ = world_model.train_epoch(
             dataloader,
             log_writer,
             start_num_batches=epoch * len(dataloader),
+            train_discriminator=train_discriminator,
         )
         if loss < min_loss:
             min_loss = loss

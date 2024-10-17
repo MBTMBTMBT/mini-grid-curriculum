@@ -635,11 +635,11 @@ class WorldModel(nn.Module):
         # --------------------
         # Discriminator Training
         # --------------------
+        real_labels = torch.ones(state.size(0), 1).to(device)
+        fake_labels = torch.zeros(state.size(0), 1).to(device)
+
         discriminator_loss = torch.tensor(0.0).to(device)
         if train_discriminator:
-            real_labels = torch.ones(state.size(0), 1).to(device)
-            fake_labels = torch.zeros(state.size(0), 1).to(device)
-
             # Train discriminator on real and fake images
             real_outputs = self.image_discriminator(
                 resized_next_state, resized_next_state,

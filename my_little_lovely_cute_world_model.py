@@ -134,14 +134,18 @@ class Discriminator(nn.Module):
         super(Discriminator, self).__init__()
         channels, height, width = input_shape
 
-        # Convolutional layers architecture for the discriminator
         conv_layers = []
         in_channels = channels
-        for out_channels, kernel_size, stride, padding in conv_arch:
+
+        # Convolutional layers based on conv_arch except the last one
+        for out_channels, kernel_size, stride, padding in conv_arch[:-1]:
             conv_layers.append(nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding))
-            # conv_layers.append(nn.BatchNorm2d(out_channels))  # Add batch normalization
-            conv_layers.append(nn.LeakyReLU(0.2, inplace=True))  # LeakyReLU with inplace=True for efficiency
+            conv_layers.append(nn.LeakyReLU(0.2, inplace=True))  # LeakyReLU in all layers except the final
             in_channels = out_channels
+
+        # Use the last set of conv_arch for the final layer (no activation)
+        last_out_channels, last_kernel_size, last_stride, last_padding = conv_arch[-1]
+        conv_layers.append(nn.Conv2d(in_channels, last_out_channels, last_kernel_size, last_stride, last_padding))
 
         self.conv_layers = nn.Sequential(*conv_layers)
 
@@ -151,7 +155,7 @@ class Discriminator(nn.Module):
     def forward(self, x):
         x = self.conv_layers(x)  # Process through convolutional layers
         x = self.global_avg_pool(x)  # Global average pooling (batch_size, out_channels, 1, 1)
-        return x.view(x.size(0), -1)  # Flatten to (batch_size, out_channels) for final real/fake classification
+        return x.view(x.size(0), -1)  # Flatten to (batch_size, out_channels)
 
 
 class ComparisonDiscriminator(nn.Module):
@@ -163,16 +167,18 @@ class ComparisonDiscriminator(nn.Module):
         super(ComparisonDiscriminator, self).__init__()
         channels, height, width = input_shape
 
-        # The input will consist of the real and reconstructed images concatenated along the channel dimension
+        # Concatenate real and reconstructed images along the channel dimension
         in_channels = channels * 2
 
-        # Convolutional layers for processing the concatenated real and fake images
         conv_layers = []
-        for out_channels, kernel_size, stride, padding in conv_arch:
+        for out_channels, kernel_size, stride, padding in conv_arch[:-1]:
             conv_layers.append(nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding))
-            # conv_layers.append(nn.BatchNorm2d(out_channels))  # Add batch normalization
-            conv_layers.append(nn.LeakyReLU(0.2, inplace=True))  # LeakyReLU with inplace=True for efficiency
+            conv_layers.append(nn.LeakyReLU(0.2, inplace=True))  # LeakyReLU in all layers except the final
             in_channels = out_channels
+
+        # Use the last set of conv_arch for the final layer (no activation)
+        last_out_channels, last_kernel_size, last_stride, last_padding = conv_arch[-1]
+        conv_layers.append(nn.Conv2d(in_channels, last_out_channels, last_kernel_size, last_stride, last_padding))
 
         self.conv_layers = nn.Sequential(*conv_layers)
 
@@ -184,7 +190,7 @@ class ComparisonDiscriminator(nn.Module):
         Forward pass through the discriminator.
         :param real_image: The real image from the environment (batch_size, channels, height, width)
         :param reconstructed_image: The reconstructed image from the generator (batch_size, channels, height, width)
-        :return: The probability that the image pair is real
+        :return: The output feature map for real and fake images
         """
         # Concatenate real and reconstructed images along the channel dimension
         combined_input = torch.cat([real_image, reconstructed_image], dim=1)  # (batch_size, 2*channels, height, width)
@@ -196,7 +202,7 @@ class ComparisonDiscriminator(nn.Module):
         x = self.global_avg_pool(x)
 
         # Flatten and return the output
-        return x.view(x.size(0), -1)  # Flatten to (batch_size, out_channels) for final classification
+        return x.view(x.size(0), -1)  # Flatten to (batch_size, out_channels)
 
 
 class TransitionModelVAE(nn.Module):

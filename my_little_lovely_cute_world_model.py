@@ -139,7 +139,8 @@ class Discriminator(nn.Module):
         in_channels = channels
         for out_channels, kernel_size, stride, padding in conv_arch:
             conv_layers.append(nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding))
-            conv_layers.append(nn.LeakyReLU(0.2))
+            # conv_layers.append(nn.BatchNorm2d(out_channels))  # Add batch normalization
+            conv_layers.append(nn.LeakyReLU(0.2, inplace=True))  # LeakyReLU with inplace=True for efficiency
             in_channels = out_channels
 
         self.conv_layers = nn.Sequential(*conv_layers)
@@ -147,30 +148,10 @@ class Discriminator(nn.Module):
         # Global average pooling to reduce the feature map to (batch_size, out_channels, 1, 1)
         self.global_avg_pool = nn.AdaptiveAvgPool2d(1)
 
-        # Calculate flattened size dynamically using a dummy input
-        flattened_size = self._get_flattened_size(input_shape, conv_arch)
-
-        # Fully connected layer that outputs a scalar, representing the probability of the image being "real"
-        self.fc = nn.Sequential(
-            nn.Linear(flattened_size, 1),  # Input is the channel count after global average pooling
-            nn.Sigmoid()  # Output range is [0, 1]
-        )
-
-    def _get_flattened_size(self, input_shape, conv_arch):
-        """
-        Dynamically calculate the flattened size based on the given convolutional architecture and input shape
-        """
-        # Create a dummy input tensor
-        sample_tensor = torch.zeros(1, *input_shape)  # Assuming batch_size = 1
-        sample_tensor = self.conv_layers(sample_tensor)
-        sample_tensor = self.global_avg_pool(sample_tensor)
-        return sample_tensor.numel()  # Return the flattened size
-
     def forward(self, x):
         x = self.conv_layers(x)  # Process through convolutional layers
         x = self.global_avg_pool(x)  # Global average pooling (batch_size, out_channels, 1, 1)
-        x = torch.flatten(x, 1)  # Flatten to (batch_size, out_channels)
-        return self.fc(x)
+        return x.view(x.size(0), -1)  # Flatten to (batch_size, out_channels) for final real/fake classification
 
 
 class ComparisonDiscriminator(nn.Module):
@@ -189,32 +170,14 @@ class ComparisonDiscriminator(nn.Module):
         conv_layers = []
         for out_channels, kernel_size, stride, padding in conv_arch:
             conv_layers.append(nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding))
-            conv_layers.append(nn.LeakyReLU(0.2))
+            # conv_layers.append(nn.BatchNorm2d(out_channels))  # Add batch normalization
+            conv_layers.append(nn.LeakyReLU(0.2, inplace=True))  # LeakyReLU with inplace=True for efficiency
             in_channels = out_channels
 
         self.conv_layers = nn.Sequential(*conv_layers)
 
         # Global average pooling to reduce the feature map to (batch_size, out_channels, 1, 1)
         self.global_avg_pool = nn.AdaptiveAvgPool2d(1)
-
-        # Calculate flattened size dynamically using a dummy input
-        flattened_size = self._get_flattened_size(input_shape, conv_arch)
-
-        # Fully connected layer that outputs a scalar, representing the probability of the image pair being "real"
-        self.fc = nn.Sequential(
-            nn.Linear(flattened_size, 1),  # Input is the channel count after global average pooling
-            # nn.Sigmoid()  # Output range is [0, 1]
-        )
-
-    def _get_flattened_size(self, input_shape, conv_arch):
-        """
-        Dynamically calculate the flattened size based on the given convolutional architecture and input shape
-        """
-        # Create a dummy input tensor, with doubled channels (real + reconstructed images)
-        sample_tensor = torch.zeros(1, input_shape[0] * 2, input_shape[1], input_shape[2])  # Assuming batch_size = 1
-        sample_tensor = self.conv_layers(sample_tensor)
-        sample_tensor = self.global_avg_pool(sample_tensor)
-        return sample_tensor.numel()  # Return the flattened size
 
     def forward(self, real_image, reconstructed_image):
         """
@@ -232,9 +195,8 @@ class ComparisonDiscriminator(nn.Module):
         # Global average pooling
         x = self.global_avg_pool(x)
 
-        # Flatten and pass through the fully connected layer to get the probability
-        x = torch.flatten(x, 1)
-        return self.fc(x)
+        # Flatten and return the output
+        return x.view(x.size(0), -1)  # Flatten to (batch_size, out_channels) for final classification
 
 
 class TransitionModelVAE(nn.Module):
@@ -396,6 +358,7 @@ class WorldModel(nn.Module):
         self.transition_model = TransitionModelVAE(self.homomorphism_latent_space, num_actions, transition_model_conv_arch)
         self.image_discriminator = ComparisonDiscriminator(obs_shape, disc_conv_arch)
         # self.transition_discriminator = ComparisonDiscriminator(obs_shape, disc_conv_arch)
+        self.num_discrimination_channels = disc_conv_arch[-1][0]
 
         self.num_actions = num_actions
 
@@ -530,8 +493,8 @@ class WorldModel(nn.Module):
         # --------------------
         # Discriminator Training
         # --------------------
-        real_labels = torch.ones(state.size(0), 1).to(device)
-        fake_labels = torch.zeros(state.size(0), 1).to(device)
+        real_labels = torch.ones(state.size(0), self.num_discrimination_channels).to(device)
+        fake_labels = torch.zeros(state.size(0), self.num_discrimination_channels).to(device)
 
         discriminator_loss = torch.tensor(0.0).to(device)
         if train_discriminator:
@@ -711,7 +674,7 @@ if __name__ == '__main__':
     dataset_samples = int(1e4)
     dataset_repeat_each_epoch = 5
     num_epochs = 50
-    batch_size = 8
+    batch_size = 32
     lr = 1e-4
     discriminator_lr = 1e-4
     train_discriminator_every_x_epoch=3
@@ -729,8 +692,8 @@ if __name__ == '__main__':
 
     disc_conv_arch = [
         (32, 3, 2, 1),
+        (48, 3, 2, 1),
         (64, 3, 2, 1),
-        (128, 3, 2, 1),
     ]
 
     transition_model_conv_arch = [

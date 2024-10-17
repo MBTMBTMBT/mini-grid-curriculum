@@ -43,6 +43,22 @@ def calculate_input_size(latent_size, cnn_net_arch):
     return size
 
 
+class ResidualBlock(nn.Module):
+    def __init__(self, in_channels):
+        super(ResidualBlock, self).__init__()
+        self.conv1 = nn.Conv2d(in_channels, in_channels, kernel_size=3, padding=1)
+        self.relu = nn.ReLU(inplace=True)
+        self.conv2 = nn.Conv2d(in_channels, in_channels, kernel_size=3, padding=1)
+
+    def forward(self, x):
+        residual = x
+        out = self.conv1(x)
+        out = self.relu(out)
+        out = self.conv2(out)
+        out += residual  # Add the input (skip connection)
+        return self.relu(out)
+
+
 class Encoder(nn.Module):
     def __init__(self, input_shape, latent_shape, cnn_net_arch):
         super(Encoder, self).__init__()
@@ -75,22 +91,6 @@ class Encoder(nn.Module):
             x = x.unsqueeze(0)  # Add the batch dimension
         x = self.resize(x)
         return self.encoder(x)
-
-
-class ResidualBlock(nn.Module):
-    def __init__(self, in_channels):
-        super(ResidualBlock, self).__init__()
-        self.conv1 = nn.Conv2d(in_channels, in_channels, kernel_size=3, padding=1)
-        self.relu = nn.ReLU(inplace=True)
-        self.conv2 = nn.Conv2d(in_channels, in_channels, kernel_size=3, padding=1)
-
-    def forward(self, x):
-        residual = x
-        out = self.conv1(x)
-        out = self.relu(out)
-        out = self.conv2(out)
-        out += residual  # Add the input (skip connection)
-        return self.relu(out)
 
 
 class Decoder(nn.Module):

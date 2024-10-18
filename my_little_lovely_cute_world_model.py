@@ -687,7 +687,7 @@ if __name__ == '__main__':
     dataset_samples = int(1e4)
     dataset_repeat_each_epoch = 5
     num_epochs = 150
-    batch_size = 32
+    batch_size = 8
     lr = 1e-4
     discriminator_lr = 1e-4
     train_discriminator_every_x_epoch=2
@@ -726,8 +726,8 @@ if __name__ == '__main__':
             config.custom_mission = "reach the goal"
             config.minimum_display_size = 7
             config.display_mode = "random"
-            config.random_rotate = True
-            config.random_flip = True
+            config.random_rotate = False
+            config.random_flip = False
             config.max_steps = 1024
             # config.start_pos = (5, 5)
             config.train_total_steps = 2.5e7

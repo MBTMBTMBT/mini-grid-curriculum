@@ -394,7 +394,7 @@ class WorldModel(nn.Module):
         )
 
         # Loss functions
-        self.adversarial_loss = nn.MSELoss()  # nn.BCELoss()
+        self.adversarial_loss = nn.L1Loss()  # nn.BCELoss()
         self.mse_loss = nn.MSELoss()
         self.mae_loss = nn.L1Loss()
 
@@ -685,7 +685,7 @@ class WorldModel(nn.Module):
 
     def train_epoch(self, dataloader: DataLoader, discriminator_dataloader: DataLoader, log_writer: SummaryWriter, start_num_batches=0, train_discriminator=True):
         total_samples = len(dataloader) * dataloader.batch_size
-        total_loss = 0.0
+        loss_sum = 0.0
 
         if train_discriminator:
             with tqdm(total=total_samples, desc="Training Discriminator", unit="sample") as pbar:
@@ -704,8 +704,8 @@ class WorldModel(nn.Module):
                 loss_dict = self.train_minibatch(obs, actions, rewards, next_obs, dones)
                 total_loss = loss_dict['total_loss']
                 running_loss = loss_dict['reconstruction_loss']
-                total_loss += running_loss
-                avg_loss = total_loss / (i + 1)
+                loss_sum += running_loss
+                avg_loss = loss_sum / (i + 1)
                 pbar.update(len(obs))
                 pbar.set_postfix({'total_loss': total_loss, 'reconstruction_loss': running_loss, 'avg_reconstruction_loss': avg_loss})
                 if not train_discriminator:

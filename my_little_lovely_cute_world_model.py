@@ -47,16 +47,16 @@ class ResidualBlock(nn.Module):
     def __init__(self, in_channels):
         super(ResidualBlock, self).__init__()
         self.conv1 = nn.Conv2d(in_channels, in_channels, kernel_size=3, padding=1)
-        self.relu = nn.ReLU(inplace=True)
+        self.activation = nn.LeakyReLU(inplace=True)
         self.conv2 = nn.Conv2d(in_channels, in_channels, kernel_size=3, padding=1)
 
     def forward(self, x):
         residual = x
         out = self.conv1(x)
-        out = self.relu(out)
+        out = self.activation(out)
         out = self.conv2(out)
         out += residual  # Add the input (skip connection)
-        return self.relu(out)
+        return self.activation(out)
 
 
 class Encoder(nn.Module):
@@ -74,7 +74,7 @@ class Encoder(nn.Module):
         in_channels = channels
         for out_channels, kernel_size, stride, padding in cnn_net_arch:
             conv_layers.append(nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding))
-            conv_layers.append(nn.ReLU())
+            conv_layers.append(nn.LeakyReLU())
 
             # Add a residual block after each Conv2D layer
             conv_layers.append(ResidualBlock(out_channels))
@@ -105,7 +105,7 @@ class Decoder(nn.Module):
         # Use transposed convolution to reconstruct the image
         for out_channels, kernel_size, stride, padding in reversed(cnn_net_arch):
             deconv_layers.append(nn.ConvTranspose2d(in_channels, out_channels, kernel_size, stride, padding))
-            deconv_layers.append(nn.ReLU())
+            deconv_layers.append(nn.LeakyReLU())
 
             # Add a residual block for additional feature extraction
             deconv_layers.append(ResidualBlock(out_channels))
@@ -215,15 +215,20 @@ class TransitionModelVAE(nn.Module):
         super(TransitionModelVAE, self).__init__()
         latent_channels, latent_height, latent_width = latent_shape
 
-        # Instead of action embedding, treat action as extra channels
         self.action_dim = action_dim
 
-        # Convolutional layers for merging the action (as extra channels) and latent state
+        # Extra convolution layer to map input channels to the expected number for the residual blocks
+        self.initial_conv = nn.Sequential(
+            nn.Conv2d(latent_channels + action_dim, conv_arch[0][0], kernel_size=3, stride=1, padding=1),  # Map 19 channels to 32
+            nn.LeakyReLU(0.2)
+        )
+
+        # Convolutional layers with Residual Blocks and Layer Normalization
         conv_layers = []
-        in_channels = latent_channels + action_dim  # Action channels are directly concatenated
+        in_channels = conv_arch[0][0]  # Starts with the output channels of the initial_conv layer
         for out_channels, kernel_size, stride, padding in conv_arch:
-            conv_layers.append(nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding))
-            conv_layers.append(nn.LeakyReLU(0.2))
+            conv_layers.append(ResidualBlock(in_channels))
+            # conv_layers.append(nn.LayerNorm([in_channels, latent_height, latent_width]))  # Layer Normalization
             in_channels = out_channels
 
         self.conv_encoder = nn.Sequential(*conv_layers)
@@ -240,14 +245,6 @@ class TransitionModelVAE(nn.Module):
         # Generate deconv architecture automatically by reversing conv_arch
         deconv_arch = self._create_deconv_arch(conv_arch, latent_channels)
 
-        # # Deconvolutional layers to decode the latent representation back to the original shape
-        # deconv_layers = []
-        # in_channels = self.output_shape[0]
-        # for out_channels, kernel_size, stride, padding in deconv_arch:
-        #     deconv_layers.append(nn.ConvTranspose2d(in_channels, out_channels, kernel_size, stride, padding))
-        #     deconv_layers.append(nn.LeakyReLU(0.2))
-        #     in_channels = out_channels
-
         # Deconvolutional layers to decode the latent representation back to the original shape
         deconv_layers = []
         in_channels = self.output_shape[0]
@@ -258,19 +255,28 @@ class TransitionModelVAE(nn.Module):
 
         self.deconv_decoder = nn.Sequential(*deconv_layers)
 
-        # Reward predictor
-        self.reward_predictor = nn.Sequential(
-            nn.Linear(self.output_shape[0] * self.output_shape[1] * self.output_shape[2], 256),
+        # Extra convolutional layer to match the size for reward and done predictions
+        self.reward_done_conv = nn.Conv2d(self.output_shape[0], self.output_shape[0], kernel_size=3, padding=1)
+
+        # Shared part of reward and done predictor with global average pooling
+        self.shared_reward_done = nn.Sequential(
+            nn.AdaptiveAvgPool2d(1),  # Global average pooling
+            nn.Flatten(),
+            nn.Linear(self.output_shape[0], 256),  # Output channels should match the final conv layer's channels
             nn.LeakyReLU(0.2),
+        )
+
+        # Final layer for reward prediction
+        self.reward_predictor = nn.Sequential(
+            self.shared_reward_done,
             nn.Linear(256, 1)  # Predict reward, output a scalar
         )
 
-        # Done predictor
+        # Final layer for done prediction
         self.done_predictor = nn.Sequential(
-            nn.Linear(self.output_shape[0] * self.output_shape[1] * self.output_shape[2], 256),
-            nn.LeakyReLU(0.2),
+            self.shared_reward_done,
             nn.Linear(256, 1),
-            nn.Sigmoid()
+            nn.Sigmoid()  # Sigmoid for binary classification of "done" state
         )
 
     def _get_output_shape(self, latent_shape, conv_arch):
@@ -279,6 +285,7 @@ class TransitionModelVAE(nn.Module):
         """
         # Assume batch_size = 1, create a dummy input
         sample_tensor = torch.zeros(1, latent_shape[0] + self.action_dim, latent_shape[1], latent_shape[2]).to(next(self.parameters()).device)  # Extra action channels added
+        sample_tensor = self.initial_conv(sample_tensor)  # Apply initial conv
         sample_tensor = self.conv_encoder(sample_tensor)
         output_shape = sample_tensor.shape[1:]  # Shape after conv layers, excluding batch size
         return output_shape
@@ -291,7 +298,6 @@ class TransitionModelVAE(nn.Module):
         """
         deconv_arch = []
         for i, (out_channels, kernel_size, stride, padding) in enumerate(reversed(conv_arch)):
-            # If it's the last layer, ensure that the output channels match latent_channels
             if i == len(conv_arch) - 1:
                 out_channels = latent_channels
             deconv_arch.append((out_channels, kernel_size, stride, padding))
@@ -312,6 +318,9 @@ class TransitionModelVAE(nn.Module):
         # Concatenate action and latent state
         x = torch.cat([latent_state, action_reshaped], dim=1)  # Action channels concatenated at the end
 
+        # Apply initial convolution to match input channels for residual blocks
+        x = self.initial_conv(x)
+
         # Process through the convolutional encoder
         x = self.conv_encoder(x)
 
@@ -330,14 +339,12 @@ class TransitionModelVAE(nn.Module):
         # Decode the latent vector back to the original latent state shape using deconv layers
         z_next_decoded = self.deconv_decoder(z_next)
 
-        # Flatten for reward and done prediction
-        x_flat = x.view(batch_size, -1)
+        # Use the extra conv layer to match the size for reward and done prediction
+        x = self.reward_done_conv(x)
 
-        # Predict reward
-        reward_pred = self.reward_predictor(x_flat)
-
-        # Predict done
-        done_pred = self.done_predictor(x_flat)
+        # Predict reward and done states
+        reward_pred = self.reward_predictor(x)
+        done_pred = self.done_predictor(x)
 
         return z_next_decoded, mean, logvar, reward_pred, done_pred
 
@@ -676,24 +683,25 @@ class WorldModel(nn.Module):
 if __name__ == '__main__':
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    session_dir = r"./experiments/world_model-door_key-7"
+    session_dir = r"./experiments/world_model-door_key"
     dataset_samples = int(1e4)
     dataset_repeat_each_epoch = 5
-    num_epochs = 50
+    num_epochs = 150
     batch_size = 32
     lr = 1e-4
     discriminator_lr = 1e-4
     train_discriminator_every_x_epoch=3
+    num_parallel = 4
 
-    latent_shape = (16, 32, 32)  # channel, height, width
-    num_homomorphism_channels = 12
+    latent_shape = (16, 16, 16)  # channel, height, width
+    num_homomorphism_channels = 8
 
     movement_augmentation = 2
 
     encoder_decoder_net_arch = [
         (32, 3, 2, 1),
         (64, 3, 2, 1),
-        (128, 3, 1, 1),
+        (128, 3, 2, 1),
     ]
 
     disc_conv_arch = [
@@ -709,22 +717,23 @@ if __name__ == '__main__':
     ]
 
     configs = []
-    for i in range(1, 7):
-        config = TaskConfig()
-        config.name = f"7-{i}"
-        config.rand_gen_shape = None
-        config.txt_file_path = f"./maps/7-{i}.txt"
-        config.custom_mission = "reach the goal"
-        config.minimum_display_size = 7
-        config.display_mode = "random"
-        config.random_rotate = True
-        config.random_flip = True
-        config.max_steps = 1024
-        config.start_pos = (5, 5)
-        config.train_total_steps = 2.5e7
-        config.difficulty_level = 0
-        config.add_random_door_key = False
-        configs.append(config)
+    for _ in range(num_parallel):
+        # for i in range(1, 7):
+            config = TaskConfig()
+            config.name = f"door_key"
+            config.rand_gen_shape = None
+            config.txt_file_path = f"./maps/door_key.txt"
+            config.custom_mission = "reach the goal"
+            config.minimum_display_size = 7
+            config.display_mode = "random"
+            config.random_rotate = True
+            config.random_flip = True
+            config.max_steps = 1024
+            # config.start_pos = (5, 5)
+            config.train_total_steps = 2.5e7
+            config.difficulty_level = 0
+            config.add_random_door_key = False
+            configs.append(config)
 
     max_minimum_display_size = 0
     for config in configs:

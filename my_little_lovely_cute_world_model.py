@@ -16,6 +16,7 @@ from matplotlib import pyplot as plt
 from stable_baselines3.common.vec_env import SubprocVecEnv
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
+from torchvision.transforms.v2.functional import resize
 from tqdm import tqdm
 
 from customize_minigrid.wrappers import FullyObsImageWrapper
@@ -393,7 +394,7 @@ class WorldModel(nn.Module):
         )
 
         # Loss functions
-        self.adversarial_loss = nn.MSELoss()  # nn.BCELoss()
+        self.adversarial_loss = nn.L1Loss()  # nn.BCELoss()
         self.mse_loss = nn.MSELoss()
         self.mae_loss = nn.L1Loss()
 
@@ -498,7 +499,7 @@ class WorldModel(nn.Module):
             reconstructed_predicted_next_state = self.decoder(predicted_latent_next_state)
 
             # **Resize the states** to match the size of the reconstructed state
-            # resized_state = F.interpolate(state, size=reconstructed_state.shape[2:], mode='bilinear',
+            # resized_state = F.interpolate(state, size=reconstructed_predicted_next_state.shape[2:], mode='bilinear',
             #                                    align_corners=False)
             resized_next_state = F.interpolate(next_state, size=reconstructed_predicted_next_state.shape[2:],
                                                mode='bilinear',
@@ -520,14 +521,12 @@ class WorldModel(nn.Module):
         d_real_loss = self.adversarial_loss(real_outputs, real_labels)
         d_fake_loss = self.adversarial_loss(fake_outputs, fake_labels)
         discriminator_loss = (d_real_loss + d_fake_loss) / 2
-        #
-        # # Train the comparison discriminator using real and fake (reconstructed) image pairs
-        # # Use both reconstructed images here so that the discriminator mainly focus on transitions
+
         # real_outputs = self.transition_discriminator(
-        #     reconstructed_next_state.detach(), reconstructed_next_state.detach(),
+        #     resized_state, resized_next_state,
         # )  # Real image compared with itself
         # fake_outputs = self.transition_discriminator(
-        #     reconstructed_next_state.detach(), reconstructed_predicted_next_state.detach(),
+        #     resized_state, reconstructed_predicted_next_state.detach(),
         # )  # Real vs. Reconstructed
         #
         # d_real_loss = self.adversarial_loss(real_outputs, real_labels)
@@ -581,7 +580,7 @@ class WorldModel(nn.Module):
         reconstructed_predicted_next_state = self.decoder(predicted_latent_next_state)
 
         # **Resize the states** to match the size of the reconstructed state
-        # resized_state = F.interpolate(state, size=reconstructed_state.shape[2:], mode='bilinear',
+        # resized_state = F.interpolate(state, size=reconstructed_predicted_next_state.shape[2:], mode='bilinear',
         #                                    align_corners=False)
         resized_next_state = F.interpolate(next_state, size=reconstructed_predicted_next_state.shape[2:], mode='bilinear',
                                            align_corners=False)
@@ -628,8 +627,8 @@ class WorldModel(nn.Module):
         # Try to fool the discriminator with the generated image
         g_fake_outputs = self.image_discriminator(resized_next_state, reconstructed_predicted_next_state)
         adversarial_loss = self.adversarial_loss(g_fake_outputs, real_labels)
-        # g_fake_outputs = self.transition_discriminator(reconstructed_next_state.detach(), reconstructed_predicted_next_state)  # Real vs. Reconstructed
-        # adversarial_loss += 0.5 * self.adversarial_loss(g_fake_outputs, real_labels)
+        # g_fake_outputs = self.transition_discriminator(resized_state, reconstructed_predicted_next_state)  # Real vs. Reconstructed
+        # adversarial_loss += self.adversarial_loss(g_fake_outputs, real_labels)
 
         # Compute reconstruction loss (MSE) between the reconstructed and resized next state
         reconstruction_loss_mse = self.mse_loss(reconstructed_predicted_next_state, resized_next_state)
@@ -672,6 +671,7 @@ class WorldModel(nn.Module):
         # Return a dictionary with all the loss values
         loss_dict = {
             # "discriminator_loss": discriminator_loss.detach().cpu().item(),
+            "reconstruction_loss": reconstruction_loss.detach().cpu().item(),
             "generator_loss": generator_loss.detach().cpu().item(),
             "vae_loss": vae_loss.detach().cpu().item(),
             "latent_transition_loss": latent_transition_loss.detach().cpu().item(),
@@ -702,11 +702,12 @@ class WorldModel(nn.Module):
             for i, batch in enumerate(dataloader):
                 obs, actions, next_obs, rewards, dones = batch
                 loss_dict = self.train_minibatch(obs, actions, rewards, next_obs, dones)
-                running_loss = loss_dict['total_loss']
+                total_loss = loss_dict['total_loss']
+                running_loss = loss_dict['reconstruction_loss']
                 total_loss += running_loss
                 avg_loss = total_loss / (i + 1)
                 pbar.update(len(obs))
-                pbar.set_postfix({'loss': running_loss, 'avg_loss': avg_loss})
+                pbar.set_postfix({'total_loss': total_loss, 'reconstruction_loss': running_loss, 'avg_reconstruction_loss': avg_loss})
                 if not train_discriminator:
                     loss_dict['discriminator_loss'] = 0.0
                 for key in loss_dict.keys():
@@ -791,8 +792,8 @@ if __name__ == '__main__':
     train_discriminator_every_x_epoch=5
     num_parallel = 4
 
-    latent_shape = (16, 16, 16)  # channel, height, width
-    num_homomorphism_channels = 8
+    latent_shape = (32, 32, 32)  # channel, height, width
+    num_homomorphism_channels = 24
 
     movement_augmentation = 3
 
@@ -801,14 +802,16 @@ if __name__ == '__main__':
         (32, 3, 1, 1),
         (64, 3, 2, 1),
         (64, 3, 1, 1),
-        (128, 3, 2, 1),
+        (128, 3, 1, 1),
         (128, 3, 1, 1),
     ]
 
     disc_conv_arch = [
         (32, 3, 2, 1),
-        (48, 3, 2, 1),
-        (64, 3, 2, 1),
+        (32, 3, 2, 1),
+        (32, 3, 2, 1),
+        (32, 3, 2, 1),
+        (32, 3, 1, 1),
     ]
 
     transition_model_conv_arch = [

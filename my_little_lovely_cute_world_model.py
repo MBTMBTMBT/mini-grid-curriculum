@@ -724,7 +724,7 @@ if __name__ == '__main__':
             config.rand_gen_shape = None
             config.txt_file_path = f"./maps/door_key.txt"
             config.custom_mission = "reach the goal"
-            # config.minimum_display_size = 7
+            config.minimum_display_size = 7
             config.display_mode = "random"
             config.random_rotate = True
             config.random_flip = True

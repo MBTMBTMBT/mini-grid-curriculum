@@ -394,7 +394,7 @@ class WorldModel(nn.Module):
         )
 
         # Loss functions
-        self.adversarial_loss = nn.L1Loss()  # nn.BCELoss()
+        self.adversarial_loss = nn.MSELoss()  # nn.BCELoss()
         self.mse_loss = nn.MSELoss()
         self.mae_loss = nn.L1Loss()
 

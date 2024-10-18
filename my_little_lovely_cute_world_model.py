@@ -635,7 +635,7 @@ class WorldModel(nn.Module):
         reconstruction_loss = reconstruction_loss_mse + reconstruction_loss_mae
 
         # Combine the losses with the given weights
-        generator_loss = 0.9 * reconstruction_loss + 0.1 * adversarial_loss
+        generator_loss = 0.5 * reconstruction_loss + 0.5 * adversarial_loss
 
         # --------------------
         # VAE Loss (Reconstruction + KL Divergence)
@@ -705,6 +705,8 @@ class WorldModel(nn.Module):
                 avg_loss = total_loss / (i + 1)
                 pbar.update(len(obs))
                 pbar.set_postfix({'loss': running_loss, 'avg_loss': avg_loss})
+                if not train_discriminator:
+                    loss_dict['discriminator_loss'] = 0.0
                 for key in loss_dict.keys():
                     log_writer.add_scalar(f'{key}', loss_dict[key], i + start_num_batches)
             else:

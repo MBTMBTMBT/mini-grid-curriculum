@@ -228,7 +228,7 @@ class TransitionModelVAE(nn.Module):
         in_channels = conv_arch[0][0]  # Starts with the output channels of the initial_conv layer
         for out_channels, kernel_size, stride, padding in conv_arch:
             conv_layers.append(ResidualBlock(in_channels))
-            # conv_layers.append(nn.LayerNorm([in_channels, latent_height, latent_width]))  # Layer Normalization
+            conv_layers.append(nn.LayerNorm([in_channels, latent_height, latent_width]))  # Add Layer Normalization
             in_channels = out_channels
 
         self.conv_encoder = nn.Sequential(*conv_layers)
@@ -245,10 +245,12 @@ class TransitionModelVAE(nn.Module):
         # Generate deconv architecture automatically by reversing conv_arch
         deconv_arch = self._create_deconv_arch(conv_arch, latent_channels)
 
-        # Deconvolutional layers to decode the latent representation back to the original shape
+        # Deconvolutional layers with Residual Blocks and Layer Normalization
         deconv_layers = []
         in_channels = self.output_shape[0]
         for out_channels, kernel_size, stride, padding in deconv_arch:
+            deconv_layers.append(ResidualBlock(in_channels))  # Add ResidualBlock
+            deconv_layers.append(nn.LayerNorm([in_channels, latent_height, latent_width]))  # Add Layer Normalization
             deconv_layers.append(nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding))
             deconv_layers.append(nn.LeakyReLU(0.2))
             in_channels = out_channels
@@ -780,8 +782,8 @@ if __name__ == '__main__':
 
     session_dir = r"./experiments/world_model-door_key"
     dataset_samples = int(1e4)
-    dataset_repeat_each_epoch = 5
-    num_epochs = 150
+    dataset_repeat_each_epoch = 10
+    num_epochs = 75
     batch_size = 8
     discriminator_batch_size = 32
     lr = 1e-4
@@ -792,12 +794,15 @@ if __name__ == '__main__':
     latent_shape = (16, 16, 16)  # channel, height, width
     num_homomorphism_channels = 8
 
-    movement_augmentation = 2
+    movement_augmentation = 3
 
     encoder_decoder_net_arch = [
         (32, 3, 2, 1),
+        (32, 3, 1, 1),
         (64, 3, 2, 1),
+        (64, 3, 1, 1),
         (128, 3, 2, 1),
+        (128, 3, 1, 1),
     ]
 
     disc_conv_arch = [

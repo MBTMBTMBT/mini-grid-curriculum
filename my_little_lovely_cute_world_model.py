@@ -459,7 +459,88 @@ class WorldModel(nn.Module):
         else:
             raise FileNotFoundError(f"No checkpoint found at {checkpoint_path}")
 
-    def train_minibatch(self, state, action, reward, next_state, done, train_discriminator=True):
+    def train_discriminator_minibatch(self, state, action, next_state):
+        device = next(self.parameters()).device
+        state = state.to(device)
+        action = action.to(device)
+        next_state = next_state.to(device)
+
+        with torch.no_grad():
+            # Encode the current and next state
+            latent_state = self.encoder(state)
+            latent_next_state = self.encoder(next_state).detach()
+
+            # Make homomorphism states
+            homo_latent_state = latent_state[:, 0:self.num_homomorphism_channels, :, :]
+            homo_latent_next_state = latent_next_state[:, 0:self.num_homomorphism_channels, :, :]
+
+            # Predict the next latent state and reward with the transition model
+            action = F.one_hot(action, self.num_actions).type(torch.float)
+            predicted_next_homo_latent_state, mean, logvar, predicted_reward, predicted_done \
+                = self.transition_model(homo_latent_state, action)
+
+            # Make homomorphism next state
+            predicted_latent_next_state = torch.cat(
+                [predicted_next_homo_latent_state,
+                 latent_state[:, self.num_homomorphism_channels:, :, :]],
+                dim=1,
+            )
+            latent_next_state = torch.cat(
+                [homo_latent_next_state,
+                 latent_state[:, self.num_homomorphism_channels:, :, :]],
+                dim=1,
+            )  # still use the obs layers from the first observation
+
+            # Reconstruct the state and predicted next state
+            # reconstructed_state = self.decoder(latent_state)
+            reconstructed_predicted_next_state = self.decoder(predicted_latent_next_state)
+
+            # **Resize the states** to match the size of the reconstructed state
+            # resized_state = F.interpolate(state, size=reconstructed_state.shape[2:], mode='bilinear',
+            #                                    align_corners=False)
+            resized_next_state = F.interpolate(next_state, size=reconstructed_predicted_next_state.shape[2:],
+                                               mode='bilinear',
+                                               align_corners=False)
+
+        # --------------------
+        # Discriminator Training
+        # --------------------
+        real_labels = torch.ones(state.size(0), self.num_discrimination_channels).to(device)
+        fake_labels = torch.zeros(state.size(0), self.num_discrimination_channels).to(device)
+
+        # Train discriminator on real and fake images
+        real_outputs = self.image_discriminator(
+            resized_next_state, resized_next_state,
+        )
+        fake_outputs = self.image_discriminator(
+            resized_next_state, reconstructed_predicted_next_state,
+        )
+        d_real_loss = self.adversarial_loss(real_outputs, real_labels)
+        d_fake_loss = self.adversarial_loss(fake_outputs, fake_labels)
+        discriminator_loss = (d_real_loss + d_fake_loss) / 2
+        #
+        # # Train the comparison discriminator using real and fake (reconstructed) image pairs
+        # # Use both reconstructed images here so that the discriminator mainly focus on transitions
+        # real_outputs = self.transition_discriminator(
+        #     reconstructed_next_state.detach(), reconstructed_next_state.detach(),
+        # )  # Real image compared with itself
+        # fake_outputs = self.transition_discriminator(
+        #     reconstructed_next_state.detach(), reconstructed_predicted_next_state.detach(),
+        # )  # Real vs. Reconstructed
+        #
+        # d_real_loss = self.adversarial_loss(real_outputs, real_labels)
+        # d_fake_loss = self.adversarial_loss(fake_outputs, fake_labels)
+        # discriminator_loss += (d_real_loss + d_fake_loss) / 2
+
+        self.discriminator_optimizer.zero_grad()
+        discriminator_loss.backward()
+        self.discriminator_optimizer.step()
+
+        return {
+            "discriminator_loss": discriminator_loss.detach().cpu().item(),
+        }
+
+    def train_minibatch(self, state, action, reward, next_state, done):
         device = next(self.parameters()).device
         state = state.to(device)
         action = action.to(device)
@@ -507,37 +588,37 @@ class WorldModel(nn.Module):
         # Discriminator Training
         # --------------------
         real_labels = torch.ones(state.size(0), self.num_discrimination_channels).to(device)
-        fake_labels = torch.zeros(state.size(0), self.num_discrimination_channels).to(device)
+        # fake_labels = torch.zeros(state.size(0), self.num_discrimination_channels).to(device)
 
-        discriminator_loss = torch.tensor(0.0).to(device)
-        if train_discriminator:
-            # Train discriminator on real and fake images
-            real_outputs = self.image_discriminator(
-                resized_next_state, resized_next_state,
-            )
-            fake_outputs = self.image_discriminator(
-                resized_next_state, reconstructed_predicted_next_state.detach(),
-            )
-            d_real_loss = self.adversarial_loss(real_outputs, real_labels)
-            d_fake_loss = self.adversarial_loss(fake_outputs, fake_labels)
-            discriminator_loss = (d_real_loss + d_fake_loss) / 2
-            #
-            # # Train the comparison discriminator using real and fake (reconstructed) image pairs
-            # # Use both reconstructed images here so that the discriminator mainly focus on transitions
-            # real_outputs = self.transition_discriminator(
-            #     reconstructed_next_state.detach(), reconstructed_next_state.detach(),
-            # )  # Real image compared with itself
-            # fake_outputs = self.transition_discriminator(
-            #     reconstructed_next_state.detach(), reconstructed_predicted_next_state.detach(),
-            # )  # Real vs. Reconstructed
-            #
-            # d_real_loss = self.adversarial_loss(real_outputs, real_labels)
-            # d_fake_loss = self.adversarial_loss(fake_outputs, fake_labels)
-            # discriminator_loss += (d_real_loss + d_fake_loss) / 2
-
-            self.discriminator_optimizer.zero_grad()
-            discriminator_loss.backward()
-            self.discriminator_optimizer.step()
+        # discriminator_loss = torch.tensor(0.0).to(device)
+        # if train_discriminator:
+        #     # Train discriminator on real and fake images
+        #     real_outputs = self.image_discriminator(
+        #         resized_next_state, resized_next_state,
+        #     )
+        #     fake_outputs = self.image_discriminator(
+        #         resized_next_state, reconstructed_predicted_next_state.detach(),
+        #     )
+        #     d_real_loss = self.adversarial_loss(real_outputs, real_labels)
+        #     d_fake_loss = self.adversarial_loss(fake_outputs, fake_labels)
+        #     discriminator_loss = (d_real_loss + d_fake_loss) / 2
+        #     #
+        #     # # Train the comparison discriminator using real and fake (reconstructed) image pairs
+        #     # # Use both reconstructed images here so that the discriminator mainly focus on transitions
+        #     # real_outputs = self.transition_discriminator(
+        #     #     reconstructed_next_state.detach(), reconstructed_next_state.detach(),
+        #     # )  # Real image compared with itself
+        #     # fake_outputs = self.transition_discriminator(
+        #     #     reconstructed_next_state.detach(), reconstructed_predicted_next_state.detach(),
+        #     # )  # Real vs. Reconstructed
+        #     #
+        #     # d_real_loss = self.adversarial_loss(real_outputs, real_labels)
+        #     # d_fake_loss = self.adversarial_loss(fake_outputs, fake_labels)
+        #     # discriminator_loss += (d_real_loss + d_fake_loss) / 2
+        #
+        #     self.discriminator_optimizer.zero_grad()
+        #     discriminator_loss.backward()
+        #     self.discriminator_optimizer.step()
 
         # --------------------
         # Generator (Decoder) Loss
@@ -588,7 +669,7 @@ class WorldModel(nn.Module):
 
         # Return a dictionary with all the loss values
         loss_dict = {
-            "discriminator_loss": discriminator_loss.detach().cpu().item(),
+            # "discriminator_loss": discriminator_loss.detach().cpu().item(),
             "generator_loss": generator_loss.detach().cpu().item(),
             "vae_loss": vae_loss.detach().cpu().item(),
             "latent_transition_loss": latent_transition_loss.detach().cpu().item(),
@@ -600,13 +681,25 @@ class WorldModel(nn.Module):
 
         return loss_dict
 
-    def train_epoch(self, dataloader: DataLoader, log_writer: SummaryWriter, start_num_batches=0, train_discriminator=True):
+    def train_epoch(self, dataloader: DataLoader, discriminator_dataloader: DataLoader, log_writer: SummaryWriter, start_num_batches=0, train_discriminator=True):
         total_samples = len(dataloader) * dataloader.batch_size
         total_loss = 0.0
+
+        if train_discriminator:
+            with tqdm(total=total_samples, desc="Training Discriminator", unit="sample") as pbar:
+                for i, batch in enumerate(discriminator_dataloader):
+                    obs, actions, next_obs, rewards, dones = batch
+                    loss_dict = self.train_discriminator_minibatch(obs, actions, next_obs)
+                    running_loss = loss_dict['discriminator_loss']
+                    pbar.update(len(obs))
+                    pbar.set_postfix({'loss': running_loss,})
+                    for key in loss_dict.keys():
+                        log_writer.add_scalar(f'{key}', loss_dict[key], i + start_num_batches)
+
         with tqdm(total=total_samples, desc="Training", unit="sample") as pbar:
             for i, batch in enumerate(dataloader):
                 obs, actions, next_obs, rewards, dones = batch
-                loss_dict = self.train_minibatch(obs, actions, rewards, next_obs, dones, train_discriminator=train_discriminator)
+                loss_dict = self.train_minibatch(obs, actions, rewards, next_obs, dones)
                 running_loss = loss_dict['total_loss']
                 total_loss += running_loss
                 avg_loss = total_loss / (i + 1)
@@ -688,9 +781,10 @@ if __name__ == '__main__':
     dataset_repeat_each_epoch = 5
     num_epochs = 150
     batch_size = 8
+    discriminator_batch_size = 32
     lr = 1e-4
     discriminator_lr = 1e-4
-    train_discriminator_every_x_epoch=2
+    train_discriminator_every_x_epoch=5
     num_parallel = 4
 
     latent_shape = (16, 16, 16)  # channel, height, width
@@ -749,6 +843,7 @@ if __name__ == '__main__':
     print(len(dataset))
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, drop_last=True)
     print(len(dataloader))
+    discriminator_dataloader = DataLoader(dataset, batch_size=discriminator_batch_size, shuffle=True, drop_last=True)
 
     log_dir = os.path.join(session_dir, "logs")
     os.makedirs(log_dir, exist_ok=True)
@@ -786,6 +881,7 @@ if __name__ == '__main__':
             train_discriminator = False
         loss, _ = world_model.train_epoch(
             dataloader,
+            discriminator_dataloader,
             log_writer,
             start_num_batches=epoch * len(dataloader),
             train_discriminator=train_discriminator,

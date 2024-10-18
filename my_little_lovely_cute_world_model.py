@@ -793,7 +793,7 @@ if __name__ == '__main__':
     num_parallel = 4
 
     latent_shape = (32, 32, 32)  # channel, height, width
-    num_homomorphism_channels = 24
+    num_homomorphism_channels = 16
 
     movement_augmentation = 3
 

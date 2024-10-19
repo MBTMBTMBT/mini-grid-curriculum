@@ -219,7 +219,7 @@ class TransitionModelVAE(nn.Module):
         self.initial_conv = nn.Sequential(
             nn.Conv2d(latent_channels + action_dim, conv_arch[0][0], kernel_size=3, stride=1, padding=1),  # e.g. 19 to 64 channels
             nn.LeakyReLU(0.2),
-            nn.LayerNorm([conv_arch[0][0], latent_height, latent_width])  # Add LayerNorm after the initial convolution
+            # nn.LayerNorm([conv_arch[0][0], latent_height, latent_width])  # Add LayerNorm after the initial convolution
         )
 
         # Convolutional layers with Residual Blocks
@@ -229,7 +229,7 @@ class TransitionModelVAE(nn.Module):
             conv_layers.append(ResidualBlock(in_channels))  # Residual block keeps the channels the same
             conv_layers.append(nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding))  # Now update the channels
             conv_layers.append(nn.LeakyReLU(0.2))
-            conv_layers.append(nn.LayerNorm([out_channels, latent_height, latent_width]))  # Add LayerNorm after conv layers
+            # conv_layers.append(nn.LayerNorm([out_channels, latent_height, latent_width]))  # Add LayerNorm after conv layers
             in_channels = out_channels  # Update in_channels for the next layer
 
         self.conv_encoder = nn.Sequential(*conv_layers)
@@ -250,7 +250,7 @@ class TransitionModelVAE(nn.Module):
             deconv_layers.append(ResidualBlock(in_channels))  # Residual block keeps channels unchanged
             deconv_layers.append(nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding))  # Reduce channels
             deconv_layers.append(nn.LeakyReLU(0.2))
-            deconv_layers.append(nn.LayerNorm([out_channels, latent_height, latent_width]))  # Add LayerNorm after deconv layers
+            # deconv_layers.append(nn.LayerNorm([out_channels, latent_height, latent_width]))  # Add LayerNorm after deconv layers
             in_channels = out_channels  # Update channels for next layer
 
         self.deconv_decoder = nn.Sequential(*deconv_layers)

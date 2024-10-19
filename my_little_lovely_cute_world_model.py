@@ -156,7 +156,7 @@ class Discriminator(nn.Module):
     def forward(self, x):
         x = self.conv_layers(x)  # Process through convolutional layers
         x = self.global_avg_pool(x)  # Global average pooling (batch_size, out_channels, 1, 1)
-        x = F.sigmoid(x)
+        # x = F.sigmoid(x)
         return x.view(x.size(0), -1)  # Flatten to (batch_size, out_channels)
 
 
@@ -202,7 +202,7 @@ class ComparisonDiscriminator(nn.Module):
 
         # Global average pooling
         x = self.global_avg_pool(x)
-        x = F.sigmoid(x)
+        # x = F.sigmoid(x)
 
         # Flatten and return the output
         return x.view(x.size(0), -1)  # Flatten to (batch_size, out_channels)
@@ -366,7 +366,7 @@ class WorldModel(nn.Module):
         )
 
         # Loss functions
-        self.adversarial_loss = nn.BCELoss()  # nn.BCELoss()
+        self.adversarial_loss = nn.MSELoss()  # nn.BCELoss()
         self.mse_loss = nn.MSELoss()
         self.mae_loss = nn.L1Loss()
 
@@ -481,7 +481,7 @@ class WorldModel(nn.Module):
         # Discriminator Training
         # --------------------
         real_labels = torch.ones(state.size(0), self.num_discrimination_channels).to(device)
-        fake_labels = torch.zeros(state.size(0), self.num_discrimination_channels).to(device)
+        fake_labels = (torch.ones(state.size(0), self.num_discrimination_channels) * -1).to(device)
 
         # Train discriminator on real and fake images
         real_outputs = self.image_discriminator(

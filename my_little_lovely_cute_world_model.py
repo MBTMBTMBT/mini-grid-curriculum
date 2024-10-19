@@ -608,7 +608,7 @@ class WorldModel(nn.Module):
         reconstruction_loss = reconstruction_loss_mse + reconstruction_loss_mae
 
         # Combine the losses with the given weights
-        generator_loss = 0.9 * reconstruction_loss + 0.1 * adversarial_loss
+        generator_loss = 0.75 * reconstruction_loss + 0.25 * adversarial_loss
 
         # --------------------
         # VAE Loss (Reconstruction + KL Divergence)

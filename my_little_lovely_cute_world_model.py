@@ -394,7 +394,7 @@ class WorldModel(nn.Module):
         )
 
         # Loss functions
-        self.adversarial_loss = nn.L1Loss()  # nn.BCELoss()
+        self.adversarial_loss = nn.MSELoss()  # nn.BCELoss()
         self.mse_loss = nn.MSELoss()
         self.mae_loss = nn.L1Loss()
 
@@ -636,7 +636,7 @@ class WorldModel(nn.Module):
         reconstruction_loss = reconstruction_loss_mse + reconstruction_loss_mae
 
         # Combine the losses with the given weights
-        generator_loss = 0.5 * reconstruction_loss + 0.5 * adversarial_loss
+        generator_loss = 0.9 * reconstruction_loss + 0.1 * adversarial_loss
 
         # --------------------
         # VAE Loss (Reconstruction + KL Divergence)
@@ -785,11 +785,11 @@ if __name__ == '__main__':
     dataset_samples = int(1e4)
     dataset_repeat_each_epoch = 10
     num_epochs = 75
-    batch_size = 8
+    batch_size = 32
     discriminator_batch_size = 32
     lr = 1e-4
     discriminator_lr = 1e-4
-    train_discriminator_every_x_epoch=5
+    train_discriminator_every_x_epoch=10
     num_parallel = 4
 
     latent_shape = (32, 32, 32)  # channel, height, width

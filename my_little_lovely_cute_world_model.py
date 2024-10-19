@@ -156,6 +156,7 @@ class Discriminator(nn.Module):
     def forward(self, x):
         x = self.conv_layers(x)  # Process through convolutional layers
         x = self.global_avg_pool(x)  # Global average pooling (batch_size, out_channels, 1, 1)
+        x = F.sigmoid(x)
         return x.view(x.size(0), -1)  # Flatten to (batch_size, out_channels)
 
 
@@ -201,6 +202,7 @@ class ComparisonDiscriminator(nn.Module):
 
         # Global average pooling
         x = self.global_avg_pool(x)
+        x = F.sigmoid(x)
 
         # Flatten and return the output
         return x.view(x.size(0), -1)  # Flatten to (batch_size, out_channels)
@@ -208,97 +210,82 @@ class ComparisonDiscriminator(nn.Module):
 
 class TransitionModelVAE(nn.Module):
     def __init__(self, latent_shape, action_dim, conv_arch):
-        """
-        :param latent_shape: Shape of the latent space (channels, height, width)
-        :param action_dim: Dimensionality of the action space (one-hot encoded)
-        :param conv_arch: Convolutional network architecture for the encoder, e.g., [(64, 4, 2, 1), (128, 4, 2, 1)]
-        """
         super(TransitionModelVAE, self).__init__()
         latent_channels, latent_height, latent_width = latent_shape
 
         self.action_dim = action_dim
 
-        # Extra convolution layer to map input channels to the expected number for the residual blocks
+        # Initial convolution to map input to the expected number of channels
         self.initial_conv = nn.Sequential(
-            nn.Conv2d(latent_channels + action_dim, conv_arch[0][0], kernel_size=3, stride=1, padding=1),  # Map 19 channels to 32
-            nn.LeakyReLU(0.2)
+            nn.Conv2d(latent_channels + action_dim, conv_arch[0][0], kernel_size=3, stride=1, padding=1),  # e.g. 19 to 64 channels
+            nn.LeakyReLU(0.2),
+            nn.LayerNorm([conv_arch[0][0], latent_height, latent_width])  # Add LayerNorm after the initial convolution
         )
 
-        # Convolutional layers with Residual Blocks and Layer Normalization
+        # Convolutional layers with Residual Blocks
         conv_layers = []
-        in_channels = conv_arch[0][0]  # Starts with the output channels of the initial_conv layer
+        in_channels = conv_arch[0][0]  # Start with output from initial_conv (e.g. 64)
         for out_channels, kernel_size, stride, padding in conv_arch:
-            conv_layers.append(ResidualBlock(in_channels))
-            conv_layers.append(nn.LayerNorm([in_channels, latent_height, latent_width]))  # Add Layer Normalization
-            in_channels = out_channels
+            conv_layers.append(ResidualBlock(in_channels))  # Residual block keeps the channels the same
+            conv_layers.append(nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding))  # Now update the channels
+            conv_layers.append(nn.LeakyReLU(0.2))
+            conv_layers.append(nn.LayerNorm([out_channels, latent_height, latent_width]))  # Add LayerNorm after conv layers
+            in_channels = out_channels  # Update in_channels for the next layer
 
         self.conv_encoder = nn.Sequential(*conv_layers)
 
-        # Dynamically calculate the flattened size after the convolutional layers
-        self.output_shape = self._get_output_shape(latent_shape, conv_arch)
+        # Dynamically calculate the output shape after conv layers
+        self.output_shape = self._get_output_shape(latent_shape)
 
-        # Single conv layer to generate both mean and logvar (2 * channels)
+        # Single convolution layer to generate both mean and logvar
         self.conv_mean_logvar = nn.Conv2d(self.output_shape[0], self.output_shape[0] * 2, kernel_size=3, padding=1)
 
-        # Adaptive pooling to collapse spatial dimensions for variance if needed
+        # Adaptive pooling if needed
         self.adaptive_pool = nn.AdaptiveAvgPool2d((1, 1))
 
-        # Generate deconv architecture automatically by reversing conv_arch
-        deconv_arch = self._create_deconv_arch(conv_arch, latent_channels)
-
-        # Deconvolutional layers with Residual Blocks and Layer Normalization
+        # Deconvolutional layers
         deconv_layers = []
-        in_channels = self.output_shape[0]
-        for out_channels, kernel_size, stride, padding in deconv_arch:
-            deconv_layers.append(ResidualBlock(in_channels))  # Add ResidualBlock
-            deconv_layers.append(nn.LayerNorm([in_channels, latent_height, latent_width]))  # Add Layer Normalization
-            deconv_layers.append(nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding))
+        in_channels = self.output_shape[0]  # Start with the encoder output channels (e.g. 128)
+        for out_channels, kernel_size, stride, padding in self._create_deconv_arch(conv_arch, latent_channels):
+            deconv_layers.append(ResidualBlock(in_channels))  # Residual block keeps channels unchanged
+            deconv_layers.append(nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding))  # Reduce channels
             deconv_layers.append(nn.LeakyReLU(0.2))
-            in_channels = out_channels
+            deconv_layers.append(nn.LayerNorm([out_channels, latent_height, latent_width]))  # Add LayerNorm after deconv layers
+            in_channels = out_channels  # Update channels for next layer
 
         self.deconv_decoder = nn.Sequential(*deconv_layers)
 
-        # Extra convolutional layer to match the size for reward and done predictions
+        # Extra conv layer for reward and done prediction
         self.reward_done_conv = nn.Conv2d(self.output_shape[0], self.output_shape[0], kernel_size=3, padding=1)
 
-        # Shared part of reward and done predictor with global average pooling
+        # Shared part of reward and done predictor
         self.shared_reward_done = nn.Sequential(
-            nn.AdaptiveAvgPool2d(1),  # Global average pooling
+            nn.AdaptiveAvgPool2d(1),
             nn.Flatten(),
-            nn.Linear(self.output_shape[0], 256),  # Output channels should match the final conv layer's channels
-            nn.LeakyReLU(0.2),
+            nn.Linear(self.output_shape[0], 256),
+            nn.LeakyReLU(0.2)
         )
 
-        # Final layer for reward prediction
+        # Reward predictor
         self.reward_predictor = nn.Sequential(
             self.shared_reward_done,
-            nn.Linear(256, 1)  # Predict reward, output a scalar
+            nn.Linear(256, 1)
         )
 
-        # Final layer for done prediction
+        # Done predictor
         self.done_predictor = nn.Sequential(
             self.shared_reward_done,
             nn.Linear(256, 1),
-            nn.Sigmoid()  # Sigmoid for binary classification of "done" state
+            nn.Sigmoid()
         )
 
-    def _get_output_shape(self, latent_shape, conv_arch):
-        """
-        Dynamically calculate the output shape based on the given convolutional architecture and input shape.
-        """
-        # Assume batch_size = 1, create a dummy input
-        sample_tensor = torch.zeros(1, latent_shape[0] + self.action_dim, latent_shape[1], latent_shape[2]).to(next(self.parameters()).device)  # Extra action channels added
-        sample_tensor = self.initial_conv(sample_tensor)  # Apply initial conv
+    def _get_output_shape(self, latent_shape):
+        sample_tensor = torch.zeros(1, latent_shape[0] + self.action_dim, latent_shape[1], latent_shape[2]).to(next(self.parameters()).device)
+        sample_tensor = self.initial_conv(sample_tensor)
         sample_tensor = self.conv_encoder(sample_tensor)
-        output_shape = sample_tensor.shape[1:]  # Shape after conv layers, excluding batch size
-        return output_shape
+        return sample_tensor.shape[1:]
 
     def _create_deconv_arch(self, conv_arch, latent_channels):
-        """
-        Create deconv architecture by reversing the conv_arch with suitable modifications.
-        The kernel_size, stride, and padding are the same, but reversed to recover the original dimensions.
-        Ensure that the final layer outputs latent_channels.
-        """
         deconv_arch = []
         for i, (out_channels, kernel_size, stride, padding) in enumerate(reversed(conv_arch)):
             if i == len(conv_arch) - 1:
@@ -307,45 +294,30 @@ class TransitionModelVAE(nn.Module):
         return deconv_arch
 
     def forward(self, latent_state, action):
-        """
-        :param latent_state: (batch_size, latent_channels, latent_height, latent_width)
-        :param action: (batch_size, action_dim), one-hot encoded action
-        :return: z_next: Next latent state, mean: Mean of the latent distribution, logvar: Log variance, reward_pred: Predicted reward, done_pred: Predicted done state
-        """
         batch_size, latent_channels, latent_height, latent_width = latent_state.shape
 
-        # Reshape action to (batch_size, action_dim, 1, 1) and then expand it to (batch_size, action_dim, latent_height, latent_width)
-        action_reshaped = action.view(batch_size, self.action_dim, 1, 1)
-        action_reshaped = action_reshaped.expand(batch_size, self.action_dim, latent_height, latent_width)
+        # Reshape action to match latent state dimensions
+        action_reshaped = action.view(batch_size, self.action_dim, 1, 1).expand(batch_size, self.action_dim, latent_height, latent_width)
+        x = torch.cat([latent_state, action_reshaped], dim=1)
 
-        # Concatenate action and latent state
-        x = torch.cat([latent_state, action_reshaped], dim=1)  # Action channels concatenated at the end
-
-        # Apply initial convolution to match input channels for residual blocks
+        # Process through encoder
         x = self.initial_conv(x)
-
-        # Process through the convolutional encoder
         x = self.conv_encoder(x)
 
-        # Generate both mean and logvar using a single conv layer (split the output)
+        # Generate mean and logvar
         mean_logvar = self.conv_mean_logvar(x)
         mean, logvar = torch.split(mean_logvar, self.output_shape[0], dim=1)
-
-        # Generate variance per channel using adaptive pooling if needed
-        logvar = self.adaptive_pool(logvar)
 
         # Reparameterization trick
         std = torch.exp(0.5 * logvar)
         eps = torch.randn_like(std)
         z_next = mean + eps * std
 
-        # Decode the latent vector back to the original latent state shape using deconv layers
+        # Process through decoder
         z_next_decoded = self.deconv_decoder(z_next)
 
-        # Use the extra conv layer to match the size for reward and done prediction
+        # Reward and done prediction
         x = self.reward_done_conv(x)
-
-        # Predict reward and done states
         reward_pred = self.reward_predictor(x)
         done_pred = self.done_predictor(x)
 
@@ -394,7 +366,7 @@ class WorldModel(nn.Module):
         )
 
         # Loss functions
-        self.adversarial_loss = nn.MSELoss()  # nn.BCELoss()
+        self.adversarial_loss = nn.BCELoss()  # nn.BCELoss()
         self.mse_loss = nn.MSELoss()
         self.mae_loss = nn.L1Loss()
 

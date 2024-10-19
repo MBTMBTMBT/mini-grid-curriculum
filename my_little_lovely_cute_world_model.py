@@ -646,7 +646,7 @@ class WorldModel(nn.Module):
         latent_transition_loss = latent_transition_loss_mse + latent_transition_loss_mae
 
         kl_loss = -0.5 * torch.sum(1 + logvar - mean.pow(2) - logvar.exp())
-        vae_loss = latent_transition_loss + kl_loss
+        vae_loss = latent_transition_loss + 0.1 * kl_loss
 
         # --------------------
         # Reward Prediction Loss
@@ -816,8 +816,8 @@ if __name__ == '__main__':
 
     transition_model_conv_arch = [
         (32, 3, 1, 1),
-        (32, 3, 1, 1),
-        (32, 3, 1, 1),
+        (64, 3, 1, 1),
+        (128, 3, 1, 1),
     ]
 
     configs = []

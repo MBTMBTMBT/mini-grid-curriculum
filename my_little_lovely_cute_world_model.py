@@ -761,7 +761,7 @@ if __name__ == '__main__':
     discriminator_batch_size = 32
     lr = 1e-4
     discriminator_lr = 1e-4
-    train_discriminator_every_x_epoch=10
+    train_discriminator_every_x_epoch=1
     num_parallel = 4
 
     latent_shape = (32, 32, 32)  # channel, height, width

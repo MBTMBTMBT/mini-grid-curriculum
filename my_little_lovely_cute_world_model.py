@@ -560,7 +560,7 @@ class WorldModel(nn.Module):
         # --------------------
         # Discriminator Training
         # --------------------
-        real_labels = torch.ones(state.size(0), self.num_discrimination_channels).to(device)
+        # real_labels = torch.ones(state.size(0), self.num_discrimination_channels).to(device)
         # fake_labels = torch.zeros(state.size(0), self.num_discrimination_channels).to(device)
 
         # discriminator_loss = torch.tensor(0.0).to(device)
@@ -597,8 +597,8 @@ class WorldModel(nn.Module):
         # Generator (Decoder) Loss
         # --------------------
         # Try to fool the discriminator with the generated image
-        g_fake_outputs = self.image_discriminator(resized_next_state, reconstructed_predicted_next_state)
-        adversarial_loss = self.adversarial_loss(g_fake_outputs, real_labels)
+        # g_fake_outputs = self.image_discriminator(resized_next_state, reconstructed_predicted_next_state)
+        # adversarial_loss = self.adversarial_loss(g_fake_outputs, real_labels)
         # g_fake_outputs = self.transition_discriminator(resized_state, reconstructed_predicted_next_state)  # Real vs. Reconstructed
         # adversarial_loss += self.adversarial_loss(g_fake_outputs, real_labels)
 
@@ -608,17 +608,17 @@ class WorldModel(nn.Module):
         reconstruction_loss = reconstruction_loss_mse + reconstruction_loss_mae
 
         # Combine the losses with the given weights
-        generator_loss = 0.75 * reconstruction_loss + 0.25 * adversarial_loss
+        generator_loss = reconstruction_loss  # + 0.25 * adversarial_loss
 
         # --------------------
         # VAE Loss (Reconstruction + KL Divergence)
         # --------------------
-        # latent_transition_loss_mse = self.mse_loss(homo_latent_next_state, predicted_next_homo_latent_state)
+        latent_transition_loss_mse = self.mse_loss(homo_latent_next_state, predicted_next_homo_latent_state)
         # latent_transition_loss_mae = self.mae_loss(homo_latent_next_state, predicted_next_homo_latent_state)
-        # latent_transition_loss = latent_transition_loss_mse  # + latent_transition_loss_mae
+        latent_transition_loss = latent_transition_loss_mse  # + latent_transition_loss_mae
 
         kl_loss = -0.5 * torch.sum(1 + logvar - mean.pow(2) - logvar.exp())
-        vae_loss = 0.1 * kl_loss  # latent_transition_loss + 0.1 * kl_loss
+        vae_loss = latent_transition_loss + 0.1 * kl_loss
 
         # --------------------
         # Reward Prediction Loss
@@ -769,6 +769,8 @@ if __name__ == '__main__':
 
     movement_augmentation = 3
 
+    train_discriminator = False
+
     encoder_decoder_net_arch = [
         (32, 3, 2, 1),
         (32, 3, 1, 1),
@@ -857,10 +859,10 @@ if __name__ == '__main__':
         print("Resampling dataset...")
         dataset.resample()
         print("Starting training...")
-        if epoch % train_discriminator_every_x_epoch == 0:
-            train_discriminator = True
-        else:
-            train_discriminator = False
+        # if epoch % train_discriminator_every_x_epoch == 0:
+        #     train_discriminator = True
+        # else:
+        #     train_discriminator = False
         loss, _ = world_model.train_epoch(
             dataloader,
             discriminator_dataloader,

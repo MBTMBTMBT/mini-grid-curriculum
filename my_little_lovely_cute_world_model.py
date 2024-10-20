@@ -311,7 +311,7 @@ class TransitionModelVAE(nn.Module):
         # Reparameterization trick
         std = torch.exp(0.5 * logvar)
         eps = torch.randn_like(std)
-        z_next = mean + eps * std
+        z_next = mean  # + eps * std
 
         # Process through decoder
         z_next_decoded = self.deconv_decoder(z_next)
@@ -765,7 +765,7 @@ if __name__ == '__main__':
     num_parallel = 4
 
     latent_shape = (32, 32, 32)  # channel, height, width
-    num_homomorphism_channels = 16
+    num_homomorphism_channels = 32
 
     movement_augmentation = 3
 

@@ -219,7 +219,7 @@ class TransitionModelVAE(nn.Module):
         self.initial_conv = nn.Sequential(
             nn.Conv2d(latent_channels + action_dim, conv_arch[0][0], kernel_size=3, stride=1, padding=1),  # e.g. 19 to 64 channels
             nn.LeakyReLU(0.2),
-            # nn.LayerNorm([conv_arch[0][0], latent_height, latent_width])  # Add LayerNorm after the initial convolution
+            nn.LayerNorm([conv_arch[0][0], latent_height, latent_width])  # Add LayerNorm after the initial convolution
         )
 
         # Convolutional layers with Residual Blocks
@@ -229,7 +229,7 @@ class TransitionModelVAE(nn.Module):
             conv_layers.append(ResidualBlock(in_channels))  # Residual block keeps the channels the same
             conv_layers.append(nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding))  # Now update the channels
             conv_layers.append(nn.LeakyReLU(0.2))
-            # conv_layers.append(nn.LayerNorm([out_channels, latent_height, latent_width]))  # Add LayerNorm after conv layers
+            conv_layers.append(nn.LayerNorm([out_channels, latent_height, latent_width]))  # Add LayerNorm after conv layers
             in_channels = out_channels  # Update in_channels for the next layer
 
         self.conv_encoder = nn.Sequential(*conv_layers)
@@ -250,7 +250,7 @@ class TransitionModelVAE(nn.Module):
             deconv_layers.append(ResidualBlock(in_channels))  # Residual block keeps channels unchanged
             deconv_layers.append(nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding))  # Reduce channels
             deconv_layers.append(nn.LeakyReLU(0.2))
-            # deconv_layers.append(nn.LayerNorm([out_channels, latent_height, latent_width]))  # Add LayerNorm after deconv layers
+            deconv_layers.append(nn.LayerNorm([out_channels, latent_height, latent_width]))  # Add LayerNorm after deconv layers
             in_channels = out_channels  # Update channels for next layer
 
         self.deconv_decoder = nn.Sequential(*deconv_layers)
@@ -311,7 +311,7 @@ class TransitionModelVAE(nn.Module):
         # Reparameterization trick
         std = torch.exp(0.5 * logvar)
         eps = torch.randn_like(std)
-        z_next = mean  # + eps * std
+        z_next = mean + eps * std
 
         # Process through decoder
         z_next_decoded = self.deconv_decoder(z_next)
@@ -548,7 +548,7 @@ class WorldModel(nn.Module):
 
         # Reconstruct the state and predicted next state
         # reconstructed_state = self.decoder(latent_state)
-        reconstructed_next_state = self.decoder(latent_next_state)
+        # reconstructed_next_state = self.decoder(latent_next_state)
         reconstructed_predicted_next_state = self.decoder(predicted_latent_next_state)
 
         # **Resize the states** to match the size of the reconstructed state
@@ -613,12 +613,12 @@ class WorldModel(nn.Module):
         # --------------------
         # VAE Loss (Reconstruction + KL Divergence)
         # --------------------
-        latent_transition_loss_mse = self.mse_loss(homo_latent_next_state, predicted_next_homo_latent_state)
-        latent_transition_loss_mae = self.mae_loss(homo_latent_next_state, predicted_next_homo_latent_state)
-        latent_transition_loss = latent_transition_loss_mse + latent_transition_loss_mae
+        # latent_transition_loss_mse = self.mse_loss(homo_latent_next_state, predicted_next_homo_latent_state)
+        # latent_transition_loss_mae = self.mae_loss(homo_latent_next_state, predicted_next_homo_latent_state)
+        # latent_transition_loss = latent_transition_loss_mse  # + latent_transition_loss_mae
 
         kl_loss = -0.5 * torch.sum(1 + logvar - mean.pow(2) - logvar.exp())
-        vae_loss = latent_transition_loss + 0.1 * kl_loss
+        vae_loss = 0.1 * kl_loss  # latent_transition_loss + 0.1 * kl_loss
 
         # --------------------
         # Reward Prediction Loss
@@ -646,7 +646,7 @@ class WorldModel(nn.Module):
             "reconstruction_loss": reconstruction_loss.detach().cpu().item(),
             "generator_loss": generator_loss.detach().cpu().item(),
             "vae_loss": vae_loss.detach().cpu().item(),
-            "latent_transition_loss": latent_transition_loss.detach().cpu().item(),
+            # "latent_transition_loss": latent_transition_loss.detach().cpu().item(),
             "kl_loss": kl_loss.detach().cpu().item(),
             "reward_loss": reward_loss.detach().cpu().item(),
             "done_loss": done_loss.detach().cpu().item(),
@@ -765,7 +765,7 @@ if __name__ == '__main__':
     num_parallel = 4
 
     latent_shape = (32, 32, 32)  # channel, height, width
-    num_homomorphism_channels = 32
+    num_homomorphism_channels = 16
 
     movement_augmentation = 3
 

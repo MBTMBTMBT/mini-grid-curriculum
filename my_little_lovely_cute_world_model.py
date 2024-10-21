@@ -91,7 +91,7 @@ class Encoder(nn.Module):
         if len(x.shape) == 3:  # If the input is missing the batch dimension
             x = x.unsqueeze(0)  # Add the batch dimension
         x = self.resize(x)
-        return F.tanh(self.encoder(x))
+        return F.sigmoid(self.encoder(x))
 
 
 class Decoder(nn.Module):
@@ -599,7 +599,7 @@ if __name__ == '__main__':
     encoder_decoder_net_arch = [
         (32, 3, 2, 1),
         # (32, 3, 1, 1),
-        (64, 3, 2, 1),
+        (64, 3, 1, 1),
         # (64, 3, 1, 1),
         (128, 3, 1, 1),
         # (128, 3, 1, 1),

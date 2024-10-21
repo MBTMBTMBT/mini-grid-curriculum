@@ -91,7 +91,7 @@ class Encoder(nn.Module):
         if len(x.shape) == 3:  # If the input is missing the batch dimension
             x = x.unsqueeze(0)  # Add the batch dimension
         x = self.resize(x)
-        return self.encoder(x)
+        return F.tanh(self.encoder(x))
 
 
 class Decoder(nn.Module):
@@ -325,12 +325,12 @@ class WorldModel(nn.Module):
 
         latest_path = os.path.join(save_dir, 'latest_checkpoint.pth')
         torch.save(checkpoint, latest_path)
-        print(f"Saved latest model checkpoint at epoch {epoch} with loss {loss:.4f}")
+        print(f"Saved latest model checkpoint at epoch {epoch} with loss {gen_loss:.4f}, {trans_loss:.4f}")
 
         if is_best:
             best_path = os.path.join(save_dir, 'best_checkpoint.pth')
             torch.save(checkpoint, best_path)
-            print(f"Saved best model checkpoint at epoch {epoch} with loss {loss:.4f}")
+            print(f"Saved best model checkpoint at epoch {epoch} with loss {gen_loss:.4f}, {trans_loss:.4f}")
 
     def load_model(self, save_dir='models', best=False):
         checkpoint_path = os.path.join(save_dir, 'best_checkpoint.pth' if best else 'latest_checkpoint.pth')
@@ -342,7 +342,7 @@ class WorldModel(nn.Module):
             epoch = checkpoint['epoch']
             gen_loss = checkpoint['gen_loss']
             trans_loss = checkpoint['trans_loss']
-            print(f"Loaded {'best' if best else 'latest'} model checkpoint from epoch {epoch} with loss {loss:.4f}")
+            print(f"Loaded {'best' if best else 'latest'} model checkpoint from epoch {epoch} with loss {gen_loss:.4f}, {trans_loss:.4f}")
             return epoch, gen_loss, trans_loss
         else:
             raise FileNotFoundError(f"No checkpoint found at {checkpoint_path}")
@@ -363,15 +363,25 @@ class WorldModel(nn.Module):
             dim=1,
         )
 
-        # get reconstructed next state
+        # get reconstructed states
+        # reconstructed_state = self.decoder(latent_state)
+        # reconstructed_next_state = self.decoder(latent_next_state)
         reconstructed_predicted_next_state = self.decoder(predicted_latent_next_state)
 
-        # get expected 'reconstructed' next state
+        # get expected 'reconstructed' states
+        # resized_state = F.interpolate(state, size=reconstructed_predicted_next_state.shape[2:],
+        #                                    mode='bilinear', align_corners=False)
         resized_next_state = F.interpolate(next_state, size=reconstructed_predicted_next_state.shape[2:],
                                            mode='bilinear', align_corners=False)
 
-        reconstruction_loss = (self.mse_loss(reconstructed_predicted_next_state, resized_next_state) +
-                               self.mae_loss(reconstructed_predicted_next_state, resized_next_state))
+        reconstruction_loss = (
+                # self.mse_loss(reconstructed_state, resized_state) +
+                # self.mae_loss(reconstructed_state, resized_state) +
+                # self.mse_loss(reconstructed_next_state, resized_next_state) +
+                # self.mae_loss(reconstructed_next_state, resized_next_state) +
+                self.mse_loss(reconstructed_predicted_next_state, resized_next_state) +
+                self.mae_loss(reconstructed_predicted_next_state, resized_next_state)
+        )
 
         # get hidden observation channels and the loss
         observation_channel_loss = self.mse_loss(
@@ -565,10 +575,10 @@ if __name__ == '__main__':
     session_dir = r"./experiments/world_model-door_key"
     dataset_samples = int(1e4)
     dataset_repeat_each_epoch = 10
-    train_ae_epochs = 50
-    train_trvae_epochs = 50
+    train_ae_epochs = 30
+    train_trvae_epochs = 60
     batch_size = 32
-    ae_lr = 1e-4
+    ae_lr = 2.5e-4
     trvae_lr = 1e-4
     num_parallel = 4
 
@@ -656,9 +666,10 @@ if __name__ == '__main__':
         start_epoch, _, _ = world_model.load_model(save_dir=os.path.join(session_dir, 'models'))
         if min_trvae_loss < float('inf'):
             start_epoch_trvae = start_epoch
+            start_epoch_trvae += 1
         else:
             start_epoch_ae = start_epoch
-        start_epoch += 1
+            start_epoch_ae += 1
     except FileNotFoundError:
         pass
 

@@ -446,7 +446,12 @@ class WorldModel(nn.Module):
         reward_loss = self.mse_loss(predicted_reward.squeeze(), reward)
         done_loss = F.binary_cross_entropy(predicted_done.squeeze(), done.float())  # Convert done to float
 
-        trvae_loss = vae_loss + reward_loss + done_loss
+        predicted_next_state = self.decoder(predicted_latent_next_state)
+        resized_next_state = F.interpolate(next_state, size=predicted_next_state.shape[2:],
+                                           mode='bilinear', align_corners=False)
+        reconstruction_loss = self.mse_loss(predicted_next_state, resized_next_state)
+
+        trvae_loss = vae_loss + reward_loss + done_loss + reconstruction_loss
 
         # Optimize the components except for the discriminator
         self.trvae_optimizer.zero_grad()
@@ -456,6 +461,7 @@ class WorldModel(nn.Module):
         # Return a dictionary with all the loss values
         loss_dict = {
             "latent_transition_loss": latent_transition_loss.detach().cpu().item(),
+            "reconstruction_loss": reconstruction_loss.detach().cpu().item(),
             "kl_loss": kl_loss.detach().cpu().item(),
             "vae_loss": vae_loss.detach().cpu().item(),
             "reward_loss": reward_loss.detach().cpu().item(),
@@ -591,7 +597,7 @@ if __name__ == '__main__':
     session_dir = r"./experiments/world_model-door_key"
     dataset_samples = int(1e4)
     dataset_repeat_each_epoch = 10
-    train_ae_epochs = 30
+    train_ae_epochs = 25
     train_trvae_epochs = 60
     batch_size = 32
     ae_lr = 2.5e-4
@@ -675,6 +681,7 @@ if __name__ == '__main__':
         if min_trvae_loss < float('inf'):
             start_epoch_trvae = start_epoch
             start_epoch_trvae += 1
+            start_epoch_ae = train_ae_epochs
         else:
             start_epoch_ae = start_epoch
             start_epoch_ae += 1

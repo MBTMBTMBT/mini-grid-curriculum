@@ -449,9 +449,9 @@ class WorldModel(nn.Module):
         predicted_next_state = self.decoder(predicted_latent_next_state)
         resized_next_state = F.interpolate(next_state, size=predicted_next_state.shape[2:],
                                            mode='bilinear', align_corners=False)
-        reconstruction_loss = self.mse_loss(predicted_next_state, resized_next_state)
+        reconstruction_disc_loss = self.mse_loss(predicted_next_state, resized_next_state)
 
-        trvae_loss = vae_loss + reward_loss + done_loss + reconstruction_loss
+        trvae_loss = vae_loss + reward_loss + done_loss + reconstruction_disc_loss
 
         # Optimize the components except for the discriminator
         self.trvae_optimizer.zero_grad()
@@ -461,7 +461,7 @@ class WorldModel(nn.Module):
         # Return a dictionary with all the loss values
         loss_dict = {
             "latent_transition_loss": latent_transition_loss.detach().cpu().item(),
-            "reconstruction_loss": reconstruction_loss.detach().cpu().item(),
+            "reconstruction_disc_loss": reconstruction_disc_loss.detach().cpu().item(),
             "kl_loss": kl_loss.detach().cpu().item(),
             "vae_loss": vae_loss.detach().cpu().item(),
             "reward_loss": reward_loss.detach().cpu().item(),

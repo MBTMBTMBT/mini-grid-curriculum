@@ -375,7 +375,7 @@ class WorldModel(nn.Module):
 
         # get hidden observation channels and the loss
         observation_channel_loss = self.mse_loss(
-            latent_state[:, self.num_homomorphism_channels:, :, :].detach(),
+            latent_state[:, self.num_homomorphism_channels:, :, :],  # .detach(),
             latent_next_state[:, self.num_homomorphism_channels:, :, :],
         )
 

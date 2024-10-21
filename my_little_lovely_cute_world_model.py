@@ -246,7 +246,7 @@ class WorldModel(nn.Module):
     def __init__(
             self,
             latent_shape: Tuple[int, int, int],
-            num_homomorphism_channels: int,
+            # num_homomorphism_channels: int,
             obs_shape: Tuple[int, int, int],
             num_actions: int,
             cnn_net_arch: List[Tuple[int, int, int, int]],
@@ -256,8 +256,8 @@ class WorldModel(nn.Module):
     ):
         super(WorldModel, self).__init__()
         self.latent_shape = latent_shape
-        self.num_homomorphism_channels = num_homomorphism_channels
-        self.homomorphism_latent_space = (num_homomorphism_channels, latent_shape[1], latent_shape[2])
+        # self.num_homomorphism_channels = num_homomorphism_channels
+        # self.homomorphism_latent_space = (num_homomorphism_channels, latent_shape[1], latent_shape[2])
         self.encoder = Encoder(obs_shape, latent_shape, cnn_net_arch)
         self.decoder = Decoder(latent_shape, obs_shape, cnn_net_arch)
         self.transition_model = TransitionModelVAE(self.homomorphism_latent_space, num_actions, transition_model_conv_arch)
@@ -290,19 +290,22 @@ class WorldModel(nn.Module):
         latent_state = self.encoder(state)
 
         # Make homomorphism state
-        homo_latent_state = latent_state[:, 0:self.num_homomorphism_channels, :, :]
+        # homo_latent_state = latent_state[:, 0:self.num_homomorphism_channels, :, :]
 
         # Predict the next latent state and reward with the transition model
         action = F.one_hot(action, self.num_actions).type(torch.float)
-        predicted_next_homo_latent_state, mean, logvar, predicted_reward, predicted_done \
-            = self.transition_model(homo_latent_state, action)
+        # predicted_next_homo_latent_state, mean, logvar, predicted_reward, predicted_done \
+        #     = self.transition_model(homo_latent_state, action)
+        predicted_next_latent_state, mean, logvar, predicted_reward, predicted_done\
+            = self.transition_model(latent_state, action)
 
         # Make homomorphism next state
-        predicted_next_state = torch.cat(
-            [predicted_next_homo_latent_state, latent_state[:, self.num_homomorphism_channels:, :, :]], dim=1)
+        # predicted_next_state = torch.cat(
+        #     [predicted_next_homo_latent_state, latent_state[:, self.num_homomorphism_channels:, :, :]], dim=1)
 
         # Reconstruct the predicted next state
-        predicted_reconstructed_state = self.decoder(predicted_next_state)
+        # predicted_reconstructed_state = self.decoder(predicted_next_state)
+        predicted_reconstructed_state = self.decoder(predicted_next_latent_state)
 
         # **Resize the next state** to match the size of the reconstructed state
         resized_predicted_next_state = F.interpolate(predicted_reconstructed_state, size=state.shape[2:], mode='bilinear',
@@ -356,30 +359,30 @@ class WorldModel(nn.Module):
         latent_state = self.encoder(state)
         latent_next_state = self.encoder(next_state)
 
-        # make the 'predicted' next latent state by merging the two latent states
-        predicted_latent_next_state = torch.cat(
-            [latent_next_state[:, 0:self.num_homomorphism_channels, :, :],
-             latent_state[:, self.num_homomorphism_channels:, :, :]],
-            dim=1,
-        )
-
-        # make fake reconstructed current state by merging random noised channels
-        fake_latent_state = torch.cat(
-            [torch.randn_like(latent_next_state[:, 0:self.num_homomorphism_channels, :, :]),
-             latent_state[:, self.num_homomorphism_channels:, :, :]],
-            dim=1,
-        )
+        # # make the 'predicted' next latent state by merging the two latent states
+        # predicted_latent_next_state = torch.cat(
+        #     [latent_next_state[:, 0:self.num_homomorphism_channels, :, :],
+        #      latent_state[:, self.num_homomorphism_channels:, :, :]],
+        #     dim=1,
+        # )
+        #
+        # # make fake reconstructed current state by merging random noised channels
+        # fake_latent_state = torch.cat(
+        #     [torch.randn_like(latent_next_state[:, 0:self.num_homomorphism_channels, :, :]),
+        #      latent_state[:, self.num_homomorphism_channels:, :, :]],
+        #     dim=1,
+        # )
 
         # get reconstructed states
-        # reconstructed_state = self.decoder(latent_state)
-        # reconstructed_next_state = self.decoder(latent_next_state)
-        reconstructed_predicted_next_state = self.decoder(predicted_latent_next_state)
-        reconstructed_fake_state = self.decoder(fake_latent_state)
-
+        reconstructed_state = self.decoder(latent_state)
+        reconstructed_next_state = self.decoder(latent_next_state)
+        # reconstructed_predicted_next_state = self.decoder(predicted_latent_next_state)
+        # reconstructed_fake_state = self.decoder(fake_latent_state)
+        #
         # get expected 'reconstructed' states
-        resized_state = F.interpolate(state, size=reconstructed_predicted_next_state.shape[2:],
+        resized_state = F.interpolate(state, size=reconstructed_state.shape[2:],
                                            mode='bilinear', align_corners=False)
-        resized_next_state = F.interpolate(next_state, size=reconstructed_predicted_next_state.shape[2:],
+        resized_next_state = F.interpolate(next_state, size=reconstructed_state.shape[2:],
                                            mode='bilinear', align_corners=False)
 
         reconstruction_loss = (
@@ -387,27 +390,27 @@ class WorldModel(nn.Module):
                 # self.mae_loss(reconstructed_state, resized_state) +
                 # self.mse_loss(reconstructed_next_state, resized_next_state) +
                 # self.mae_loss(reconstructed_next_state, resized_next_state) +
-                self.mse_loss(reconstructed_fake_state, resized_state) +
-                self.mae_loss(reconstructed_fake_state, resized_state) +
-                self.mse_loss(reconstructed_predicted_next_state, resized_next_state) +
-                self.mae_loss(reconstructed_predicted_next_state, resized_next_state)
+                self.mse_loss(reconstructed_state, resized_state) +
+                self.mae_loss(reconstructed_state, resized_state) +
+                self.mse_loss(reconstructed_next_state, resized_next_state) +
+                self.mae_loss(reconstructed_next_state, resized_next_state)
         )
 
         # get hidden observation channels and the loss
-        observation_channel_loss = self.mse_loss(
-            latent_state[:, self.num_homomorphism_channels:, :, :],  # .detach(),
-            latent_next_state[:, self.num_homomorphism_channels:, :, :],
-        )
+        # observation_channel_loss = self.mse_loss(
+        #     latent_state[:, self.num_homomorphism_channels:, :, :],  # .detach(),
+        #     latent_next_state[:, self.num_homomorphism_channels:, :, :],
+        # )
 
-        ae_loss = reconstruction_loss + observation_channel_loss
+        ae_loss = reconstruction_loss # + observation_channel_loss
 
         self.ae_optimizer.zero_grad()
         ae_loss.backward()
         self.ae_optimizer.step()
 
         return {
-            "reconstruction_loss": reconstruction_loss.detach().cpu().item(),
-            "observation_channel_loss": observation_channel_loss.detach().cpu().item(),
+            # "reconstruction_loss": reconstruction_loss.detach().cpu().item(),
+            # "observation_channel_loss": observation_channel_loss.detach().cpu().item(),
             "ae_loss": ae_loss.detach().cpu().item(),
         }
 
@@ -425,15 +428,17 @@ class WorldModel(nn.Module):
             latent_next_state = self.encoder(next_state)
 
         # Make homomorphism states
-        homo_latent_state = latent_state[:, 0:self.num_homomorphism_channels, :, :]
-        homo_latent_next_state = latent_next_state[:, 0:self.num_homomorphism_channels, :, :]
+        # homo_latent_state = latent_state[:, 0:self.num_homomorphism_channels, :, :]
+        # homo_latent_next_state = latent_next_state[:, 0:self.num_homomorphism_channels, :, :]
 
         # Predict the next latent state and reward with the transition model
         action = F.one_hot(action, self.num_actions).type(torch.float)
-        predicted_next_homo_latent_state, mean, logvar, predicted_reward, predicted_done \
-            = self.transition_model(homo_latent_state, action)
+        # predicted_next_homo_latent_state, mean, logvar, predicted_reward, predicted_done \
+        #     = self.transition_model(homo_latent_state, action)
+        predicted_latent_next_state, mean, logvar, predicted_reward, predicted_done \
+            = self.transition_model(latent_state, action)
 
-        latent_transition_loss = self.mse_loss(homo_latent_next_state, predicted_next_homo_latent_state)
+        latent_transition_loss = self.mse_loss(latent_next_state, predicted_latent_next_state)
         kl_loss = -0.5 * torch.sum(1 + logvar - mean.pow(2) - logvar.exp())
 
         vae_loss = latent_transition_loss + 0.1 * kl_loss
@@ -593,7 +598,7 @@ if __name__ == '__main__':
     num_parallel = 4
 
     latent_shape = (32, 32, 32)  # channel, height, width
-    num_homomorphism_channels = 16
+    # num_homomorphism_channels = 16
     movement_augmentation = 3
 
     encoder_decoder_net_arch = [
@@ -650,7 +655,7 @@ if __name__ == '__main__':
 
     world_model = WorldModel(
         latent_shape=latent_shape,
-        num_homomorphism_channels=num_homomorphism_channels,
+        # num_homomorphism_channels=num_homomorphism_channels,
         obs_shape=venv.observation_space.shape,
         num_actions=venv.action_space.n,
         cnn_net_arch=encoder_decoder_net_arch,

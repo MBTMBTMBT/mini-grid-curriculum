@@ -363,14 +363,22 @@ class WorldModel(nn.Module):
             dim=1,
         )
 
+        # make fake reconstructed current state by merging random noised channels
+        fake_latent_state = torch.cat(
+            [torch.randn_like(latent_next_state[:, 0:self.num_homomorphism_channels, :, :]),
+             latent_state[:, self.num_homomorphism_channels:, :, :]],
+            dim=1,
+        )
+
         # get reconstructed states
         # reconstructed_state = self.decoder(latent_state)
         # reconstructed_next_state = self.decoder(latent_next_state)
         reconstructed_predicted_next_state = self.decoder(predicted_latent_next_state)
+        reconstructed_fake_state = self.decoder(fake_latent_state)
 
         # get expected 'reconstructed' states
-        # resized_state = F.interpolate(state, size=reconstructed_predicted_next_state.shape[2:],
-        #                                    mode='bilinear', align_corners=False)
+        resized_state = F.interpolate(state, size=reconstructed_predicted_next_state.shape[2:],
+                                           mode='bilinear', align_corners=False)
         resized_next_state = F.interpolate(next_state, size=reconstructed_predicted_next_state.shape[2:],
                                            mode='bilinear', align_corners=False)
 
@@ -379,6 +387,8 @@ class WorldModel(nn.Module):
                 # self.mae_loss(reconstructed_state, resized_state) +
                 # self.mse_loss(reconstructed_next_state, resized_next_state) +
                 # self.mae_loss(reconstructed_next_state, resized_next_state) +
+                self.mse_loss(reconstructed_fake_state, resized_state) +
+                self.mae_loss(reconstructed_fake_state, resized_state) +
                 self.mse_loss(reconstructed_predicted_next_state, resized_next_state) +
                 self.mae_loss(reconstructed_predicted_next_state, resized_next_state)
         )

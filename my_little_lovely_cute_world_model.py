@@ -750,7 +750,7 @@ if __name__ == '__main__':
     trvae_lr = 1e-4
     num_parallel = 4
 
-    latent_shape = (8, 32, 32)  # channel, height, width
+    latent_shape = (8, 24, 24)  # channel, height, width
     # num_homomorphism_channels = 16
     movement_augmentation = 3
 

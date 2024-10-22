@@ -40,7 +40,7 @@ action_dict = {
 
 # Define a unified loss function class that combines Perceptual, SSIM, and MAE/MSE losses
 class UnifiedLoss(nn.Module):
-    def __init__(self, perc_weight=0.333, ssim_weight=0.333, pixel_loss_weight=0.333):
+    def __init__(self, perc_weight=0.6666, ssim_weight=0.3334, pixel_loss_weight=1.0):
         super(UnifiedLoss, self).__init__()
         # Load pre-trained VGG16 layers for perceptual loss
         self.vgg_layers = vgg16(pretrained=True).features[:16]
@@ -163,9 +163,9 @@ class Decoder(nn.Module):
         return self.decoder(latent_state)
 
 
-class _TransitionModelVAE(nn.Module):
+class TransitionModelVAE(nn.Module):
     def __init__(self, latent_shape, action_dim, conv_arch):
-        super(_TransitionModelVAE, self).__init__()
+        super(TransitionModelVAE, self).__init__()
         latent_channels, latent_height, latent_width = latent_shape
 
         self.action_dim = action_dim

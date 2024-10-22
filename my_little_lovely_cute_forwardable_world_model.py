@@ -35,7 +35,7 @@ action_dict = {
 
 # Define a unified loss function class that combines Perceptual, SSIM, and MAE/MSE losses
 class UnifiedLoss(nn.Module):
-    def __init__(self, perc_weight=0.6666, ssim_weight=0.3334, pixel_loss_weight=1.0):
+    def __init__(self, perc_weight=0.3333, ssim_weight=0.3333, pixel_loss_weight=0.3333):
         super(UnifiedLoss, self).__init__()
         # Load pre-trained VGG16 layers for perceptual loss
         self.vgg_layers = vgg16(pretrained=True).features[:16]
@@ -331,6 +331,36 @@ class ForwardableWorldModel(nn.Module):
             return epoch, gen_loss, trans_loss
         else:
             raise FileNotFoundError(f"No checkpoint found at {checkpoint_path}")
+
+    def train_batch(self, state, action, reward, next_state, done, loss_func=UnifiedLoss()):
+        device = next(self.parameters()).device
+        state = state.to(device)
+        action = action.to(device)
+        reward = reward.to(device)
+        next_state = next_state.to(device)
+        done = done.to(device)
+
+        (
+            predicted_reconstructed_state,
+            predicted_reconstructed_next_state,
+            predicted_latent_next_state,
+            predicted_reward,
+            predicted_done,
+        ) = self.forward(state, action)
+
+        resized_state = F.interpolate(state, size=predicted_reconstructed_state.shape[2:],
+                                           mode='bilinear',
+                                           align_corners=False)
+        resized_next_state = F.interpolate(next_state, size=predicted_reconstructed_next_state.shape[2:],
+                                           mode='bilinear',
+                                           align_corners=False)
+
+        reconstruction_loss = loss_func(resized_state, predicted_reconstructed_state)
+        latent_transition_loss = loss_func(resized_next_state, predicted_reconstructed_next_state)
+        reward_loss = F.l1_loss(predicted_reward, reward)
+        done_loss = F.binary_cross_entropy(predicted_done, done)
+
+        total_loss = reconstruction_loss + latent_transition_loss + reward_loss + done_loss
 
     def train_autoencoder_minibatch(self, state, next_state):
         device = next(self.parameters()).device

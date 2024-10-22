@@ -39,7 +39,7 @@ class UnifiedLoss(nn.Module):
         super(UnifiedLoss, self).__init__()
         # Load pre-trained layers for perceptual loss
         # self.perc_layers = vgg16(pretrained=True).features[:16]
-        self.perc_layers = torch.nn.Sequential(*list(resnet34(pretrained=True).children())[:8])
+        self.perc_layers = torch.nn.Sequential(*list(resnet152(pretrained=True).children())[:8])
         for param in self.perc_layers.parameters():
             param.requires_grad = False  # Freeze VGG parameters
 
@@ -53,8 +53,8 @@ class UnifiedLoss(nn.Module):
         gen_features = self.perc_layers(gen_img)
         target_features = self.perc_layers(target_img)
         perceptual_loss = (
-                nn.functional.l1_loss(gen_features, target_features) +
-                nn.functional.mse_loss(gen_features, target_features)
+                nn.functional.l1_loss(gen_features, target_features)
+                # + nn.functional.mse_loss(gen_features, target_features)
         )
 
         # SSIM Loss: 1 - SSIM(generated, target) as loss

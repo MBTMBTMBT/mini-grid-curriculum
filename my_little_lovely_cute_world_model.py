@@ -16,6 +16,8 @@ from matplotlib import pyplot as plt
 from stable_baselines3.common.vec_env import SubprocVecEnv
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
+from torchvision.models import vgg16
+from piq import ssim
 from torchvision.transforms.v2.functional import resize
 from tqdm import tqdm
 
@@ -34,6 +36,41 @@ action_dict = {
     5: "toggle",
     6: "done"
 }
+
+
+# Define a unified loss function class that combines Perceptual, SSIM, and MAE/MSE losses
+class UnifiedLoss(nn.Module):
+    def __init__(self, perc_weight=0.333, ssim_weight=0.333, pixel_loss_weight=0.333):
+        super(UnifiedLoss, self).__init__()
+        # Load pre-trained VGG16 layers for perceptual loss
+        self.vgg_layers = vgg16(pretrained=True).features[:16]
+        for param in self.vgg_layers.parameters():
+            param.requires_grad = False  # Freeze VGG parameters
+
+        # Weights for each loss component
+        self.perc_weight = perc_weight
+        self.ssim_weight = ssim_weight
+        self.pixel_loss_weight = pixel_loss_weight
+
+    def forward(self, gen_img, target_img):
+        # Perceptual Loss: Extract features and compute L1 loss between them
+        gen_features = self.vgg_layers(gen_img)
+        target_features = self.vgg_layers(target_img)
+        perceptual_loss = nn.functional.l1_loss(gen_features, target_features)
+
+        # SSIM Loss: 1 - SSIM(generated, target) as loss
+        ssim_loss = 1 - ssim(gen_img, target_img, data_range=1.0)
+
+        # Pixel-wise loss
+        pixel_loss = (nn.functional.mse_loss(gen_img, target_img)
+                      + nn.functional.l1_loss(gen_img, target_img))
+
+        # Combine all losses with respective weights
+        total_loss = (self.perc_weight * perceptual_loss +
+                      self.ssim_weight * ssim_loss +
+                      self.pixel_loss_weight * pixel_loss)
+
+        return total_loss
 
 
 # Function to calculate the input size based on the cnn_net_arch and target latent size
@@ -378,6 +415,7 @@ class WorldModel(nn.Module):
         # Loss functions
         self.mse_loss = nn.MSELoss()
         self.mae_loss = nn.L1Loss()
+        self.uni_loss = UnifiedLoss()
 
     def forward(self, state, action):
         device = next(self.parameters()).device
@@ -493,10 +531,12 @@ class WorldModel(nn.Module):
                 # self.mae_loss(reconstructed_state, resized_state) +
                 # self.mse_loss(reconstructed_next_state, resized_next_state) +
                 # self.mae_loss(reconstructed_next_state, resized_next_state) +
-                self.mse_loss(reconstructed_state, resized_state) +
-                self.mae_loss(reconstructed_state, resized_state) +
-                self.mse_loss(reconstructed_next_state, resized_next_state) +
-                self.mae_loss(reconstructed_next_state, resized_next_state)
+                # self.mse_loss(reconstructed_state, resized_state) +
+                # self.mae_loss(reconstructed_state, resized_state) +
+                # self.mse_loss(reconstructed_next_state, resized_next_state) +
+                # self.mae_loss(reconstructed_next_state, resized_next_state)
+                self.uni_loss(reconstructed_state, resized_state) +
+                self.uni_loss(reconstructed_next_state, resized_next_state)
         )
 
         # get hidden observation channels and the loss
@@ -553,7 +593,7 @@ class WorldModel(nn.Module):
         predicted_next_state = self.decoder(predicted_latent_next_state)
         resized_next_state = F.interpolate(next_state, size=predicted_next_state.shape[2:],
                                            mode='bilinear', align_corners=False)
-        reconstruction_disc_loss = self.mse_loss(predicted_next_state, resized_next_state)
+        reconstruction_disc_loss = self.uni_loss(predicted_next_state, resized_next_state)
 
         trvae_loss = vae_loss + reward_loss + done_loss + reconstruction_disc_loss
 
@@ -711,11 +751,11 @@ if __name__ == '__main__':
     train_ae_epochs = 10
     train_trvae_epochs = 30
     batch_size = 32
-    ae_lr = 5e-4
+    ae_lr = 1e-4
     trvae_lr = 1e-4
     num_parallel = 4
 
-    latent_shape = (16, 24, 24)  # channel, height, width
+    latent_shape = (8, 24, 24)  # channel, height, width
     # num_homomorphism_channels = 16
     movement_augmentation = 3
 

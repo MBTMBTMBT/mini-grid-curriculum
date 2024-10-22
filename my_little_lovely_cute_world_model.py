@@ -126,9 +126,9 @@ class Decoder(nn.Module):
         return self.decoder(latent_state)
 
 
-class TransitionModelVAE(nn.Module):
+class _TransitionModelVAE(nn.Module):
     def __init__(self, latent_shape, action_dim, conv_arch):
-        super(TransitionModelVAE, self).__init__()
+        super(_TransitionModelVAE, self).__init__()
         latent_channels, latent_height, latent_width = latent_shape
 
         self.action_dim = action_dim
@@ -243,6 +243,103 @@ class TransitionModelVAE(nn.Module):
         return z_next_decoded, mean, logvar, reward_pred, done_pred
 
 
+class SimpleTransitionModel(nn.Module):
+    def __init__(self, latent_shape, action_dim, conv_arch):
+        """
+        A simplified transition model that replaces VAE with a deterministic CNN-based approach.
+        :param latent_shape: Shape of the latent space (channels, height, width)
+        :param action_dim: Dimensionality of the action space (one-hot encoded)
+        :param conv_arch: Convolutional network architecture for the encoder, e.g., [(64, 4, 2, 1), (128, 4, 2, 1)]
+        """
+        super(SimpleTransitionModel, self).__init__()
+        latent_channels, latent_height, latent_width = latent_shape
+
+        self.action_dim = action_dim
+
+        # Initial convolution to map input (latent + action) to expected channels
+        self.initial_conv = nn.Sequential(
+            nn.Conv2d(latent_channels + action_dim, conv_arch[0][0], kernel_size=3, stride=1, padding=1),  # e.g. 19 to 64 channels
+            nn.LeakyReLU()
+        )
+
+        # Encoder: Convolutional layers (simplified)
+        conv_layers = []
+        in_channels = conv_arch[0][0]  # Start with output from initial_conv (e.g. 64)
+        for out_channels, kernel_size, stride, padding in conv_arch:
+            conv_layers.append(nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding))  # Standard Conv layer
+            conv_layers.append(nn.LeakyReLU())  # ReLU activation after each Conv
+            in_channels = out_channels  # Update the number of channels
+
+        self.conv_encoder = nn.Sequential(*conv_layers)
+
+        # Decoder: Simplified version to reverse the process
+        deconv_layers = []
+        in_channels = conv_arch[-1][0]  # Start with the encoder's final output channels
+        for out_channels, kernel_size, stride, padding in reversed(conv_arch):
+            deconv_layers.append(nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding))  # Conv for decoding
+            deconv_layers.append(nn.LeakyReLU())  # ReLU activation
+            in_channels = out_channels  # Update the number of channels
+
+        self.deconv_decoder = nn.Sequential(*deconv_layers)
+
+        # Final convolution to ensure the output matches the latent shape
+        self.final_conv = nn.Conv2d(in_channels, latent_channels, kernel_size=3, stride=1, padding=1)
+
+        # Reward and Done prediction layers (as in the original model)
+        self.reward_done_conv = nn.Conv2d(conv_arch[-1][0], conv_arch[-1][0], kernel_size=3, padding=1)
+
+        # Shared part for reward and done prediction
+        self.shared_reward_done = nn.Sequential(
+            nn.AdaptiveAvgPool2d(1),  # Global average pooling
+            nn.Flatten(),
+            nn.Linear(conv_arch[-1][0], 256),
+            nn.LeakyReLU()
+        )
+
+        # Reward predictor
+        self.reward_predictor = nn.Sequential(
+            self.shared_reward_done,
+            nn.Linear(256, 1)
+        )
+
+        # Done predictor
+        self.done_predictor = nn.Sequential(
+            self.shared_reward_done,
+            nn.Linear(256, 1),
+            nn.Sigmoid()  # Sigmoid for binary classification of "done" state
+        )
+
+    def forward(self, latent_state, action):
+        """
+        Forward pass through the deterministic transition model.
+        :param latent_state: (batch_size, latent_channels, latent_height, latent_width)
+        :param action: (batch_size, action_dim), one-hot encoded action
+        :return: z_next: Next latent state (determined by CNN), reward_pred: Predicted reward, done_pred: Predicted done state
+        """
+        batch_size, latent_channels, latent_height, latent_width = latent_state.shape
+
+        # Reshape action to match latent state dimensions
+        action_reshaped = action.view(batch_size, self.action_dim, 1, 1).expand(batch_size, self.action_dim, latent_height, latent_width)
+
+        # Concatenate action and latent state
+        x = torch.cat([latent_state, action_reshaped], dim=1)
+
+        # Process through encoder
+        x = self.initial_conv(x)
+        x = self.conv_encoder(x)
+
+        # Process through decoder
+        z_next_decoded = self.deconv_decoder(x)
+        z_next_decoded = self.final_conv(z_next_decoded)  # Final conv to match latent shape
+
+        # Reward and Done prediction
+        x = self.reward_done_conv(x)
+        reward_pred = self.reward_predictor(x)
+        done_pred = self.done_predictor(x)
+
+        return z_next_decoded, reward_pred, done_pred
+
+
 class WorldModel(nn.Module):
     def __init__(
             self,
@@ -261,7 +358,7 @@ class WorldModel(nn.Module):
         # self.homomorphism_latent_space = (num_homomorphism_channels, latent_shape[1], latent_shape[2])
         self.encoder = Encoder(obs_shape, latent_shape, cnn_net_arch)
         self.decoder = Decoder(latent_shape, obs_shape, cnn_net_arch)
-        self.transition_model = TransitionModelVAE(latent_shape, num_actions, transition_model_conv_arch)
+        self.transition_model = SimpleTransitionModel(latent_shape, num_actions, transition_model_conv_arch)
 
         self.num_actions = num_actions
 
@@ -607,14 +704,14 @@ if __name__ == '__main__':
     session_dir = r"./experiments/world_model-door_key"
     dataset_samples = int(1e4)
     dataset_repeat_each_epoch = 10
-    train_ae_epochs = 50
+    train_ae_epochs = 10
     train_trvae_epochs = 60
     batch_size = 32
     ae_lr = 1e-4
     trvae_lr = 1e-4
     num_parallel = 4
 
-    latent_shape = (32, 32, 32)  # channel, height, width
+    latent_shape = (8, 24, 24)  # channel, height, width
     # num_homomorphism_channels = 16
     movement_augmentation = 3
 
@@ -628,9 +725,8 @@ if __name__ == '__main__':
     ]
 
     transition_model_conv_arch = [
-        (32, 3, 1, 1),
         (64, 3, 1, 1),
-        (128, 3, 1, 1),
+        (64, 3, 1, 1),
     ]
 
     configs = []

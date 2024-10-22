@@ -35,7 +35,7 @@ action_dict = {
 
 # Define a unified loss function class that combines Perceptual, SSIM, and MAE/MSE losses
 class UnifiedLoss(nn.Module):
-    def __init__(self, perc_weight=0.3333, ssim_weight=0.3333, pixel_loss_weight=3333):
+    def __init__(self, perc_weight=0.3333, ssim_weight=0.3333, pixel_loss_weight=0.3333):
         super(UnifiedLoss, self).__init__()
         # Load pre-trained VGG16 layers for perceptual loss
         self.vgg_layers = vgg16(pretrained=True).features[:16]

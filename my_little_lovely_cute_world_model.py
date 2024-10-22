@@ -743,14 +743,14 @@ if __name__ == '__main__':
     session_dir = r"./experiments/world_model-door_key"
     dataset_samples = int(1e4)
     dataset_repeat_each_epoch = 10
-    train_ae_epochs = 10
-    train_trvae_epochs = 30
-    batch_size = 32
+    train_ae_epochs = 15
+    train_trvae_epochs = 50
+    batch_size = 64
     ae_lr = 1e-4
     trvae_lr = 1e-4
     num_parallel = 4
 
-    latent_shape = (8, 24, 24)  # channel, height, width
+    latent_shape = (8, 32, 32)  # channel, height, width
     # num_homomorphism_channels = 16
     movement_augmentation = 3
 

@@ -394,7 +394,9 @@ class WorldModel(nn.Module):
         action = F.one_hot(action, self.num_actions).type(torch.float)
         # predicted_next_homo_latent_state, mean, logvar, predicted_reward, predicted_done \
         #     = self.transition_model(homo_latent_state, action)
-        predicted_next_latent_state, mean, logvar, predicted_reward, predicted_done\
+        # predicted_next_latent_state, mean, logvar, predicted_reward, predicted_done\
+        #     = self.transition_model(latent_state, action)
+        predicted_next_latent_state, predicted_reward, predicted_done \
             = self.transition_model(latent_state, action)
 
         # Make homomorphism next state
@@ -536,13 +538,15 @@ class WorldModel(nn.Module):
         action = F.one_hot(action, self.num_actions).type(torch.float)
         # predicted_next_homo_latent_state, mean, logvar, predicted_reward, predicted_done \
         #     = self.transition_model(homo_latent_state, action)
-        predicted_latent_next_state, mean, logvar, predicted_reward, predicted_done \
+        # predicted_latent_next_state, mean, logvar, predicted_reward, predicted_done \
+        #     = self.transition_model(latent_state, action)
+        predicted_latent_next_state, predicted_reward, predicted_done \
             = self.transition_model(latent_state, action)
 
         latent_transition_loss = self.mse_loss(latent_next_state, predicted_latent_next_state)
-        kl_loss = -0.5 * torch.sum(1 + logvar - mean.pow(2) - logvar.exp())
+        # kl_loss = -0.5 * torch.sum(1 + logvar - mean.pow(2) - logvar.exp())
 
-        vae_loss = latent_transition_loss + 0.1 * kl_loss
+        vae_loss = latent_transition_loss  # + 0.1 * kl_loss
         reward_loss = self.mse_loss(predicted_reward.squeeze(), reward)
         done_loss = F.binary_cross_entropy(predicted_done.squeeze(), done.float())  # Convert done to float
 
@@ -560,9 +564,9 @@ class WorldModel(nn.Module):
 
         # Return a dictionary with all the loss values
         loss_dict = {
-            "latent_transition_loss": latent_transition_loss.detach().cpu().item(),
+            # "latent_transition_loss": latent_transition_loss.detach().cpu().item(),
             "reconstruction_disc_loss": reconstruction_disc_loss.detach().cpu().item(),
-            "kl_loss": kl_loss.detach().cpu().item(),
+            # "kl_loss": kl_loss.detach().cpu().item(),
             "vae_loss": vae_loss.detach().cpu().item(),
             "reward_loss": reward_loss.detach().cpu().item(),
             "done_loss": done_loss.detach().cpu().item(),
@@ -618,7 +622,7 @@ class WorldModel(nn.Module):
                     pbar.update(len(obs))
                     pbar.set_postfix(
                         {
-                            'latent_transition_loss': loss_dict['latent_transition_loss'],
+                            'vae_loss': loss_dict['vae_loss'],
                             'trvae_loss': loss_dict['trvae_loss'],
                             'avg_trvae_loss': avg_loss,
                         }
@@ -705,7 +709,7 @@ if __name__ == '__main__':
     dataset_samples = int(1e4)
     dataset_repeat_each_epoch = 10
     train_ae_epochs = 10
-    train_trvae_epochs = 60
+    train_trvae_epochs = 30
     batch_size = 32
     ae_lr = 1e-4
     trvae_lr = 1e-4

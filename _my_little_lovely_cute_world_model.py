@@ -423,13 +423,18 @@ class WorldModel(nn.Module):
             [predicted_next_homo_latent_state, latent_state[:, self.num_homomorphism_channels:, :, :]], dim=1)
 
         # Reconstruct the predicted next state
-        reconstructed_state = self.decoder(predicted_next_state)
+        predicted_reconstructed_state = self.decoder(latent_state)
+        predicted_reconstructed_next_state = self.decoder(predicted_next_state)
 
         # **Resize the next state** to match the size of the reconstructed state
-        resized_next_state = F.interpolate(reconstructed_state, size=reconstructed_state.shape[2:], mode='bilinear',
+        resized_predicted_next_state = F.interpolate(predicted_reconstructed_next_state, size=state.shape[2:],
+                                                     mode='bilinear',
+                                                     align_corners=False)
+        resized_next_state = F.interpolate(predicted_reconstructed_state, size=state.shape[2:],
+                                           mode='bilinear',
                                            align_corners=False)
 
-        return resized_next_state, predicted_reward, predicted_done
+        return resized_next_state, resized_predicted_next_state, predicted_reward, predicted_done
 
     def save_model(self, epoch, loss, save_dir='models', is_best=False):
         if not os.path.exists(save_dir):
@@ -479,7 +484,7 @@ class WorldModel(nn.Module):
 
             # Make homomorphism states
             homo_latent_state = latent_state[:, 0:self.num_homomorphism_channels, :, :]
-            homo_latent_next_state =  latent_next_state[:, 0:self.num_homomorphism_channels, :, :]
+            homo_latent_next_state = latent_next_state[:, 0:self.num_homomorphism_channels, :, :]
 
             # Predict the next latent state and reward with the transition model
             action = F.one_hot(action, self.num_actions).type(torch.float)
@@ -725,27 +730,34 @@ class WorldModel(nn.Module):
                             if idx >= 10:
                                 break
 
-                            pred_next_ob, pred_reward, pred_done = self.forward(ob.unsqueeze(dim=0),
-                                                                                action.unsqueeze(dim=0))
+                            rec_ob, pred_next_ob, pred_reward, pred_done = self.forward(ob.unsqueeze(dim=0),
+                                                                                        action.unsqueeze(dim=0))
 
-                            # Convert tensors from GPU to CPU
-                            ob_cpu = ob.cpu().detach().permute(1, 2, 0)  # Convert to HWC format for image display
-                            next_ob_cpu = next_ob.cpu().detach().permute(1, 2, 0)
-                            pred_next_ob_cpu = pred_next_ob.squeeze(0).cpu().detach().permute(1, 2, 0)
+                            # Convert tensors from GPU to CPU and adjust dimensions for display (HWC format)
+                            ob_cpu = ob.cpu().detach().permute(1, 2, 0)  # Current observation
+                            rec_ob_cpu = rec_ob.squeeze(0).cpu().detach().permute(1, 2, 0)  # Reconstructed observation
+                            pred_next_ob_cpu = pred_next_ob.squeeze(0).cpu().detach().permute(1, 2,
+                                                                                              0)  # Predicted next observation
+                            next_ob_cpu = next_ob.cpu().detach().permute(1, 2, 0)  # Actual next observation
 
-                            # Get the string label for the action from the simple dictionary
+                            # Get the string label for the action from the dictionary
                             action_str = action_dict.get(action.item(), "Unknown Action")
 
                             # Create a figure to combine all visualizations and scalar information
-                            fig, axs = plt.subplots(2, 3, figsize=(12, 8))
+                            fig, axs = plt.subplots(2, 4, figsize=(16, 8))  # 2 rows, 4 columns for layout
 
-                            # Plot images: Observation, Predicted Next Observation, Actual Next Observation
+                            # Plot images: Observation, Reconstructed Observation, Predicted Next Observation, Actual Next Observation
                             axs[0, 0].imshow(ob_cpu)
                             axs[0, 0].set_title('Observation')
-                            axs[0, 1].imshow(pred_next_ob_cpu)
-                            axs[0, 1].set_title('Predicted Next Observation')
-                            axs[0, 2].imshow(next_ob_cpu)
-                            axs[0, 2].set_title('Actual Next Observation')
+
+                            axs[0, 1].imshow(rec_ob_cpu)  # Draw the reconstructed observation
+                            axs[0, 1].set_title('Reconstructed Observation')
+
+                            axs[0, 2].imshow(pred_next_ob_cpu)
+                            axs[0, 2].set_title('Predicted Next Observation')
+
+                            axs[0, 3].imshow(next_ob_cpu)  # Draw the actual next observation
+                            axs[0, 3].set_title('Actual Next Observation')
 
                             # Plot scalar values: Action, Predicted Reward/Done, Actual Reward/Done
                             axs[1, 0].text(0.5, 0.5, f'Action: {action_str}', horizontalalignment='center',
@@ -765,6 +777,9 @@ class WorldModel(nn.Module):
                             axs[1, 2].set_title('Actual Reward & Done')
                             axs[1, 2].axis('off')
 
+                            # Remove the extra axis in the second row, fourth column
+                            axs[1, 3].axis('off')
+
                             # Convert the figure to a PIL Image and then to a Tensor
                             buf = io.BytesIO()
                             plt.tight_layout()
@@ -779,6 +794,7 @@ class WorldModel(nn.Module):
 
                             # Close the figure to free memory
                             plt.close(fig)
+
         return avg_loss, start_num_batches
 
 

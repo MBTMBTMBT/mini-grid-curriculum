@@ -2,22 +2,19 @@ import io
 import os
 from typing import Tuple, List
 
-import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import gymnasium as gym
 from PIL import Image
-from gymnasium.wrappers import FrameStack, AtariPreprocessing, LazyFrames
-from gymnasium.vector import AsyncVectorEnv, VectorEnv
 import torch.nn.functional as F
 import torchvision.transforms as T
 from matplotlib import pyplot as plt
 from stable_baselines3.common.vec_env import SubprocVecEnv
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
-from torchvision.transforms.v2.functional import resize
 from tqdm import tqdm
+from torchvision.models import vgg16
+from piq import ssim
 
 from customize_minigrid.wrappers import FullyObsImageWrapper
 from gymnasium_dataset import GymDataset
@@ -34,6 +31,41 @@ action_dict = {
     5: "toggle",
     6: "done"
 }
+
+
+# Define a unified loss function class that combines Perceptual, SSIM, and MAE/MSE losses
+class UnifiedLoss(nn.Module):
+    def __init__(self, perc_weight=0.333, ssim_weight=0.333, pixel_loss_weight=0.333):
+        super(UnifiedLoss, self).__init__()
+        # Load pre-trained VGG16 layers for perceptual loss
+        self.vgg_layers = vgg16(pretrained=True).features[:16]
+        for param in self.vgg_layers.parameters():
+            param.requires_grad = False  # Freeze VGG parameters
+
+        # Weights for each loss component
+        self.perc_weight = perc_weight
+        self.ssim_weight = ssim_weight
+        self.pixel_loss_weight = pixel_loss_weight
+
+    def forward(self, gen_img, target_img):
+        # Perceptual Loss: Extract features and compute L1 loss between them
+        gen_features = self.vgg_layers(gen_img)
+        target_features = self.vgg_layers(target_img)
+        perceptual_loss = nn.functional.l1_loss(gen_features, target_features)
+
+        # SSIM Loss: 1 - SSIM(generated, target) as loss
+        ssim_loss = 1 - ssim(gen_img, target_img, data_range=1.0)
+
+        # Pixel-wise loss
+        pixel_loss = (nn.functional.mse_loss(gen_img, target_img)
+                      + nn.functional.l1_loss(gen_img, target_img))
+
+        # Combine all losses with respective weights
+        total_loss = (self.perc_weight * perceptual_loss +
+                      self.ssim_weight * ssim_loss +
+                      self.pixel_loss_weight * pixel_loss)
+
+        return total_loss
 
 
 # Function to calculate the input size based on the cnn_net_arch and target latent size
@@ -91,7 +123,7 @@ class Encoder(nn.Module):
         if len(x.shape) == 3:  # If the input is missing the batch dimension
             x = x.unsqueeze(0)  # Add the batch dimension
         x = self.resize(x)
-        return self.encoder(x)
+        return F.sigmoid(self.encoder(x))
 
 
 class Decoder(nn.Module):
@@ -391,13 +423,18 @@ class WorldModel(nn.Module):
             [predicted_next_homo_latent_state, latent_state[:, self.num_homomorphism_channels:, :, :]], dim=1)
 
         # Reconstruct the predicted next state
-        reconstructed_state = self.decoder(predicted_next_state)
+        predicted_reconstructed_state = self.decoder(latent_state)
+        predicted_reconstructed_next_state = self.decoder(predicted_next_state)
 
         # **Resize the next state** to match the size of the reconstructed state
-        resized_next_state = F.interpolate(reconstructed_state, size=reconstructed_state.shape[2:], mode='bilinear',
+        resized_predicted_next_state = F.interpolate(predicted_reconstructed_next_state, size=state.shape[2:],
+                                                     mode='bilinear',
+                                                     align_corners=False)
+        resized_next_state = F.interpolate(predicted_reconstructed_state, size=state.shape[2:],
+                                           mode='bilinear',
                                            align_corners=False)
 
-        return resized_next_state, predicted_reward, predicted_done
+        return resized_next_state, resized_predicted_next_state, predicted_reward, predicted_done
 
     def save_model(self, epoch, loss, save_dir='models', is_best=False):
         if not os.path.exists(save_dir):
@@ -447,7 +484,7 @@ class WorldModel(nn.Module):
 
             # Make homomorphism states
             homo_latent_state = latent_state[:, 0:self.num_homomorphism_channels, :, :]
-            homo_latent_next_state =  latent_next_state[:, 0:self.num_homomorphism_channels, :, :]
+            homo_latent_next_state = latent_next_state[:, 0:self.num_homomorphism_channels, :, :]
 
             # Predict the next latent state and reward with the transition model
             action = F.one_hot(action, self.num_actions).type(torch.float)
@@ -693,27 +730,34 @@ class WorldModel(nn.Module):
                             if idx >= 10:
                                 break
 
-                            pred_next_ob, pred_reward, pred_done = self.forward(ob.unsqueeze(dim=0),
-                                                                                action.unsqueeze(dim=0))
+                            rec_ob, pred_next_ob, pred_reward, pred_done = self.forward(ob.unsqueeze(dim=0),
+                                                                                        action.unsqueeze(dim=0))
 
-                            # Convert tensors from GPU to CPU
-                            ob_cpu = ob.cpu().detach().permute(1, 2, 0)  # Convert to HWC format for image display
-                            next_ob_cpu = next_ob.cpu().detach().permute(1, 2, 0)
-                            pred_next_ob_cpu = pred_next_ob.squeeze(0).cpu().detach().permute(1, 2, 0)
+                            # Convert tensors from GPU to CPU and adjust dimensions for display (HWC format)
+                            ob_cpu = ob.cpu().detach().permute(1, 2, 0)  # Current observation
+                            rec_ob_cpu = rec_ob.squeeze(0).cpu().detach().permute(1, 2, 0)  # Reconstructed observation
+                            pred_next_ob_cpu = pred_next_ob.squeeze(0).cpu().detach().permute(1, 2,
+                                                                                              0)  # Predicted next observation
+                            next_ob_cpu = next_ob.cpu().detach().permute(1, 2, 0)  # Actual next observation
 
-                            # Get the string label for the action from the simple dictionary
+                            # Get the string label for the action from the dictionary
                             action_str = action_dict.get(action.item(), "Unknown Action")
 
                             # Create a figure to combine all visualizations and scalar information
-                            fig, axs = plt.subplots(2, 3, figsize=(12, 8))
+                            fig, axs = plt.subplots(2, 4, figsize=(16, 8))  # 2 rows, 4 columns for layout
 
-                            # Plot images: Observation, Predicted Next Observation, Actual Next Observation
+                            # Plot images: Observation, Reconstructed Observation, Predicted Next Observation, Actual Next Observation
                             axs[0, 0].imshow(ob_cpu)
                             axs[0, 0].set_title('Observation')
-                            axs[0, 1].imshow(pred_next_ob_cpu)
-                            axs[0, 1].set_title('Predicted Next Observation')
-                            axs[0, 2].imshow(next_ob_cpu)
-                            axs[0, 2].set_title('Actual Next Observation')
+
+                            axs[0, 1].imshow(rec_ob_cpu)  # Draw the reconstructed observation
+                            axs[0, 1].set_title('Reconstructed Observation')
+
+                            axs[0, 2].imshow(pred_next_ob_cpu)
+                            axs[0, 2].set_title('Predicted Next Observation')
+
+                            axs[0, 3].imshow(next_ob_cpu)  # Draw the actual next observation
+                            axs[0, 3].set_title('Actual Next Observation')
 
                             # Plot scalar values: Action, Predicted Reward/Done, Actual Reward/Done
                             axs[1, 0].text(0.5, 0.5, f'Action: {action_str}', horizontalalignment='center',
@@ -733,6 +777,9 @@ class WorldModel(nn.Module):
                             axs[1, 2].set_title('Actual Reward & Done')
                             axs[1, 2].axis('off')
 
+                            # Remove the extra axis in the second row, fourth column
+                            axs[1, 3].axis('off')
+
                             # Convert the figure to a PIL Image and then to a Tensor
                             buf = io.BytesIO()
                             plt.tight_layout()
@@ -747,6 +794,7 @@ class WorldModel(nn.Module):
 
                             # Close the figure to free memory
                             plt.close(fig)
+
         return avg_loss, start_num_batches
 
 

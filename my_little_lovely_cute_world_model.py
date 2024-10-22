@@ -2,14 +2,10 @@ import io
 import os
 from typing import Tuple, List
 
-import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import gymnasium as gym
 from PIL import Image
-from gymnasium.wrappers import FrameStack, AtariPreprocessing, LazyFrames
-from gymnasium.vector import AsyncVectorEnv, VectorEnv
 import torch.nn.functional as F
 import torchvision.transforms as T
 from matplotlib import pyplot as plt
@@ -18,7 +14,6 @@ from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from torchvision.models import vgg16
 from piq import ssim
-from torchvision.transforms.v2.functional import resize
 from tqdm import tqdm
 
 from customize_minigrid.wrappers import FullyObsImageWrapper

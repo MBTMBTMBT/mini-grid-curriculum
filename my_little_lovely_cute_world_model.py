@@ -12,7 +12,7 @@ from matplotlib import pyplot as plt
 from stable_baselines3.common.vec_env import SubprocVecEnv
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
-from torchvision.models import vgg16
+from torchvision.models import *
 from piq import ssim
 from tqdm import tqdm
 
@@ -37,9 +37,10 @@ action_dict = {
 class UnifiedLoss(nn.Module):
     def __init__(self, perc_weight=0.3333, ssim_weight=0.3333, pixel_loss_weight=0.3333):
         super(UnifiedLoss, self).__init__()
-        # Load pre-trained VGG16 layers for perceptual loss
-        self.vgg_layers = vgg16(pretrained=True).features[:16]
-        for param in self.vgg_layers.parameters():
+        # Load pre-trained layers for perceptual loss
+        # self.perc_layers = vgg16(pretrained=True).features[:16]
+        self.perc_layers = torch.nn.Sequential(*list(resnet152(pretrained=True).children())[:8])
+        for param in self.perc_layers.parameters():
             param.requires_grad = False  # Freeze VGG parameters
 
         # Weights for each loss component
@@ -49,9 +50,12 @@ class UnifiedLoss(nn.Module):
 
     def forward(self, gen_img, target_img):
         # Perceptual Loss: Extract features and compute L1 loss between them
-        gen_features = self.vgg_layers(gen_img)
-        target_features = self.vgg_layers(target_img)
-        perceptual_loss = nn.functional.l1_loss(gen_features, target_features)
+        gen_features = self.perc_layers(gen_img)
+        target_features = self.perc_layers(target_img)
+        perceptual_loss = (
+                nn.functional.l1_loss(gen_features, target_features) +
+                nn.functional.mse_loss(gen_features, target_features)
+        )
 
         # SSIM Loss: 1 - SSIM(generated, target) as loss
         ssim_loss = 1 - ssim(gen_img, target_img, data_range=1.0)
@@ -746,7 +750,7 @@ if __name__ == '__main__':
     train_ae_epochs = 15
     train_trvae_epochs = 50
     batch_size = 32
-    ae_lr = 1e-4
+    ae_lr = 5e-4
     trvae_lr = 1e-4
     num_parallel = 4
 

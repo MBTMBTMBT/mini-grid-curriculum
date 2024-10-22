@@ -711,11 +711,11 @@ if __name__ == '__main__':
     train_ae_epochs = 10
     train_trvae_epochs = 30
     batch_size = 32
-    ae_lr = 1e-4
+    ae_lr = 5e-4
     trvae_lr = 1e-4
     num_parallel = 4
 
-    latent_shape = (8, 24, 24)  # channel, height, width
+    latent_shape = (16, 24, 24)  # channel, height, width
     # num_homomorphism_channels = 16
     movement_augmentation = 3
 

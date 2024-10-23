@@ -438,8 +438,8 @@ class WorldModel(nn.Module):
         self.homomorphism_latent_space = (num_homomorphism_channels, latent_shape[1], latent_shape[2])
         self.encoder = Encoder(obs_shape, latent_shape, cnn_net_arch)
         self.decoder = Decoder(latent_shape, obs_shape, cnn_net_arch)
-        # self.transition_model = TransitionModelVAE(self.homomorphism_latent_space, num_actions, transition_model_conv_arch)
-        self.transition_model = SimpleTransitionModel(self.homomorphism_latent_space, num_actions, transition_model_conv_arch)
+        self.transition_model = TransitionModelVAE(self.homomorphism_latent_space, num_actions, transition_model_conv_arch)
+        # self.transition_model = SimpleTransitionModel(self.homomorphism_latent_space, num_actions, transition_model_conv_arch)
 
         self.num_actions = num_actions
 
@@ -469,10 +469,10 @@ class WorldModel(nn.Module):
 
         # Predict the next latent state and reward with the transition model
         action = F.one_hot(action, self.num_actions).type(torch.float)
-        # predicted_next_homo_latent_state, mean, logvar, predicted_reward, predicted_done \
-        #     = self.transition_model(homo_latent_state, action)
-        predicted_next_homo_latent_state, predicted_reward, predicted_done \
+        predicted_next_homo_latent_state, mean, logvar, predicted_reward, predicted_done \
             = self.transition_model(homo_latent_state, action)
+        # predicted_next_homo_latent_state, predicted_reward, predicted_done \
+        #     = self.transition_model(homo_latent_state, action)
 
         # Make homomorphism next state
         predicted_next_state = torch.cat(
@@ -543,10 +543,10 @@ class WorldModel(nn.Module):
 
         # Predict the next latent state and reward with the transition model
         action = F.one_hot(action, self.num_actions).type(torch.float)
-        # predicted_next_homo_latent_state, mean, logvar, predicted_reward, predicted_done \
-        #     = self.transition_model(homo_latent_state, action)
-        predicted_next_homo_latent_state, predicted_reward, predicted_done \
+        predicted_next_homo_latent_state, mean, logvar, predicted_reward, predicted_done \
             = self.transition_model(homo_latent_state, action)
+        # predicted_next_homo_latent_state, predicted_reward, predicted_done \
+        #     = self.transition_model(homo_latent_state, action)
 
         # Make homomorphism next state
         predicted_latent_next_state = torch.cat(
@@ -714,7 +714,7 @@ class WorldModel(nn.Module):
 if __name__ == '__main__':
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    session_dir = r"./experiments/full-world_model-door_key"
+    session_dir = r"./experiments/full-vae-world_model-door_key"
     dataset_samples = int(1.5e4)
     dataset_repeat_each_epoch = 5
     num_epochs = 25

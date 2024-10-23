@@ -601,7 +601,7 @@ class WorldModel(nn.Module):
         # Total Loss
         # --------------------
         # total_loss = vae_loss + reward_loss + generator_loss + done_loss
-        total_loss = reconstruction_loss + reward_loss + kl_loss + done_loss + encoder_reconstruction_loss
+        total_loss = reconstruction_loss + reward_loss + done_loss + encoder_reconstruction_loss  # + kl_loss
         self.optimizer.zero_grad()
         total_loss.backward()
         self.optimizer.step()
@@ -715,7 +715,7 @@ if __name__ == '__main__':
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     session_dir = r"./experiments/full-world_model-door_key"
-    dataset_samples = int(1e4)
+    dataset_samples = int(1.5e4)
     dataset_repeat_each_epoch = 1
     num_epochs = 75
     batch_size = 32

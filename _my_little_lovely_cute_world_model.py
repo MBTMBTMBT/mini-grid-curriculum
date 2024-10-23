@@ -37,7 +37,7 @@ action_dict = {
 class FlexibleThresholdedLoss(nn.Module):
     def __init__(self, use_mse_threshold=False, use_mae_threshold=True, mse_threshold=None, mae_threshold=None,
                  reduction='mean', l1_weight=1.0, l2_weight=1.0, threshold_weight=1.0, non_threshold_weight=1.0,
-                 mse_clip_ratio=None, mae_clip_ratio=1e1):
+                 mse_clip_ratio=None, mae_clip_ratio=5e3):
         """
         use_mse_threshold: Whether to apply a threshold to L2 (MSE)-based loss.
         use_mae_threshold: Whether to apply a threshold to L1-based loss.

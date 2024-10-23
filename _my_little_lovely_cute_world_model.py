@@ -313,6 +313,7 @@ class TransitionModelVAE(nn.Module):
 
         # Process through decoder
         z_next_decoded = self.deconv_decoder(z_next)
+        z_next_decoded = F.sigmoid(z_next_decoded)
 
         # Reward and done prediction
         x = self.reward_done_conv(x)
@@ -320,6 +321,104 @@ class TransitionModelVAE(nn.Module):
         done_pred = self.done_predictor(x)
 
         return z_next_decoded, mean, logvar, reward_pred, done_pred
+
+
+class SimpleTransitionModel(nn.Module):
+    def __init__(self, latent_shape, action_dim, conv_arch):
+        """
+        A simplified transition model that replaces VAE with a deterministic CNN-based approach.
+        :param latent_shape: Shape of the latent space (channels, height, width)
+        :param action_dim: Dimensionality of the action space (one-hot encoded)
+        :param conv_arch: Convolutional network architecture for the encoder, e.g., [(64, 4, 2, 1), (128, 4, 2, 1)]
+        """
+        super(SimpleTransitionModel, self).__init__()
+        latent_channels, latent_height, latent_width = latent_shape
+
+        self.action_dim = action_dim
+
+        # Initial convolution to map input (latent + action) to expected channels
+        self.initial_conv = nn.Sequential(
+            nn.Conv2d(latent_channels + action_dim, conv_arch[0][0], kernel_size=3, stride=1, padding=1),  # e.g. 19 to 64 channels
+            nn.LeakyReLU()
+        )
+
+        # Encoder: Convolutional layers (simplified)
+        conv_layers = []
+        in_channels = conv_arch[0][0]  # Start with output from initial_conv (e.g. 64)
+        for out_channels, kernel_size, stride, padding in conv_arch:
+            conv_layers.append(nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding))  # Standard Conv layer
+            conv_layers.append(nn.LeakyReLU())  # ReLU activation after each Conv
+            in_channels = out_channels  # Update the number of channels
+
+        self.conv_encoder = nn.Sequential(*conv_layers)
+
+        # Decoder: Simplified version to reverse the process
+        deconv_layers = []
+        in_channels = conv_arch[-1][0]  # Start with the encoder's final output channels
+        for out_channels, kernel_size, stride, padding in reversed(conv_arch):
+            deconv_layers.append(nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding))  # Conv for decoding
+            deconv_layers.append(nn.LeakyReLU())  # ReLU activation
+            in_channels = out_channels  # Update the number of channels
+
+        self.deconv_decoder = nn.Sequential(*deconv_layers)
+
+        # Final convolution to ensure the output matches the latent shape
+        self.final_conv = nn.Conv2d(in_channels, latent_channels, kernel_size=3, stride=1, padding=1)
+
+        # Reward and Done prediction layers (as in the original model)
+        self.reward_done_conv = nn.Conv2d(conv_arch[-1][0], conv_arch[-1][0], kernel_size=3, padding=1)
+
+        # Shared part for reward and done prediction
+        self.shared_reward_done = nn.Sequential(
+            nn.AdaptiveAvgPool2d(1),  # Global average pooling
+            nn.Flatten(),
+            nn.Linear(conv_arch[-1][0], 256),
+            nn.LeakyReLU()
+        )
+
+        # Reward predictor
+        self.reward_predictor = nn.Sequential(
+            self.shared_reward_done,
+            nn.Linear(256, 1)
+        )
+
+        # Done predictor
+        self.done_predictor = nn.Sequential(
+            self.shared_reward_done,
+            nn.Linear(256, 1),
+            nn.Sigmoid()  # Sigmoid for binary classification of "done" state
+        )
+
+    def forward(self, latent_state, action):
+        """
+        Forward pass through the deterministic transition model.
+        :param latent_state: (batch_size, latent_channels, latent_height, latent_width)
+        :param action: (batch_size, action_dim), one-hot encoded action
+        :return: z_next: Next latent state (determined by CNN), reward_pred: Predicted reward, done_pred: Predicted done state
+        """
+        batch_size, latent_channels, latent_height, latent_width = latent_state.shape
+
+        # Reshape action to match latent state dimensions
+        action_reshaped = action.view(batch_size, self.action_dim, 1, 1).expand(batch_size, self.action_dim, latent_height, latent_width)
+
+        # Concatenate action and latent state
+        x = torch.cat([latent_state, action_reshaped], dim=1)
+
+        # Process through encoder
+        x = self.initial_conv(x)
+        x = self.conv_encoder(x)
+
+        # Process through decoder
+        z_next_decoded = self.deconv_decoder(x)
+        z_next_decoded = self.final_conv(z_next_decoded)  # Final conv to match latent shape
+        z_next_decoded = F.sigmoid(z_next_decoded)
+
+        # Reward and Done prediction
+        x = self.reward_done_conv(x)
+        reward_pred = self.reward_predictor(x)
+        done_pred = self.done_predictor(x)
+
+        return z_next_decoded, reward_pred, done_pred
 
 
 class WorldModel(nn.Module):
@@ -433,11 +532,11 @@ class WorldModel(nn.Module):
 
         # Encode the current and next state
         latent_state = self.encoder(state)
-        # latent_next_state = self.encoder(next_state).detach()
+        latent_next_state = self.encoder(next_state).detach()
 
         # Make homomorphism states
         homo_latent_state = latent_state[:, 0:self.num_homomorphism_channels, :, :]
-        # homo_latent_next_state = latent_next_state[:, 0:self.num_homomorphism_channels, :, :]
+        homo_latent_next_state = latent_next_state[:, 0:self.num_homomorphism_channels, :, :]
 
         # Predict the next latent state and reward with the transition model
         action = F.one_hot(action, self.num_actions).type(torch.float)
@@ -450,15 +549,15 @@ class WorldModel(nn.Module):
              latent_state[:, self.num_homomorphism_channels:, :, :]],
             dim=1,
         )
-        # latent_next_state = torch.cat(
-        #     [homo_latent_next_state,
-        #      latent_state[:, self.num_homomorphism_channels:, :, :]],
-        #     dim=1,
-        # )  # still use the obs layers from the first observation
+        latent_next_state = torch.cat(
+            [homo_latent_next_state,
+             latent_state[:, self.num_homomorphism_channels:, :, :]],
+            dim=1,
+        )  # still use the obs layers from the first observation
 
         # Reconstruct the state and predicted next state
         # reconstructed_state = self.decoder(latent_state)
-        # reconstructed_next_state = self.decoder(latent_next_state)
+        reconstructed_next_state = self.decoder(latent_next_state)
         reconstructed_predicted_next_state = self.decoder(predicted_latent_next_state)
 
         # **Resize the states** to match the size of the reconstructed state
@@ -469,6 +568,7 @@ class WorldModel(nn.Module):
 
         # Compute reconstruction loss (MSE) between the reconstructed and resized next state
         reconstruction_loss = self.mbt_loss(reconstructed_predicted_next_state, resized_next_state)
+        encoder_reconstruction_loss = self.mbt_loss(reconstructed_next_state, resized_next_state)
         reconstruction_mae_loss = self.mae_loss(reconstructed_predicted_next_state, resized_next_state)
 
 
@@ -496,7 +596,7 @@ class WorldModel(nn.Module):
         # Total Loss
         # --------------------
         # total_loss = vae_loss + reward_loss + generator_loss + done_loss
-        total_loss = reconstruction_loss + reward_loss + kl_loss + done_loss
+        total_loss = reconstruction_loss + reward_loss + kl_loss + done_loss + encoder_reconstruction_loss
         self.optimizer.zero_grad()
         total_loss.backward()
         self.optimizer.step()
@@ -505,6 +605,7 @@ class WorldModel(nn.Module):
         loss_dict = {
             "reconstruction_loss": reconstruction_loss.detach().cpu().item(),
             "reconstruction_mae_loss": reconstruction_mae_loss.detach().cpu().item(),
+            "encoder_reconstruction_loss": encoder_reconstruction_loss.detach().cpu().item(),
             "kl_loss": kl_loss.detach().cpu().item(),
             "reward_loss": reward_loss.detach().cpu().item(),
             "done_loss": done_loss.detach().cpu().item(),

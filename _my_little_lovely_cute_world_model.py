@@ -781,8 +781,8 @@ if __name__ == '__main__':
     lr = 1e-4
     num_parallel = 6
 
-    latent_shape = (12, 32, 32)  # channel, height, width
-    num_homomorphism_channels = 8
+    latent_shape = (8, 24, 24)  # channel, height, width
+    num_homomorphism_channels = 5
 
     movement_augmentation = 6
 
@@ -805,7 +805,7 @@ if __name__ == '__main__':
             config.rand_gen_shape = None
             config.txt_file_path = f"./maps/base_env.txt"
             config.custom_mission = "reach the goal"
-            config.minimum_display_size = 14
+            config.minimum_display_size = 12
             config.display_mode = "random"
             config.random_rotate = True
             config.random_flip = True

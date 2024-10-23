@@ -497,7 +497,7 @@ class WorldModel(nn.Module):
         self.homomorphism_latent_space = (num_homomorphism_channels, latent_shape[1], latent_shape[2])
         self.encoder = Encoder(obs_shape, latent_shape, cnn_net_arch)
         self.decoder = Decoder(latent_shape, obs_shape, cnn_net_arch)
-        self.transition_model = TransitionModelVAE(self.homomorphism_latent_space, num_actions, transition_model_conv_arch)
+        self.transition_model = TransitionModel(self.homomorphism_latent_space, num_actions, transition_model_conv_arch)
         # self.transition_model = SimpleTransitionModel(self.homomorphism_latent_space, num_actions, transition_model_conv_arch)
 
         self.num_actions = num_actions
@@ -528,10 +528,10 @@ class WorldModel(nn.Module):
 
         # Predict the next latent state and reward with the transition model
         action = F.one_hot(action, self.num_actions).type(torch.float)
-        predicted_next_homo_latent_state, mean, logvar, predicted_reward, predicted_done \
-            = self.transition_model(homo_latent_state, action)
-        # predicted_next_homo_latent_state, predicted_reward, predicted_done \
+        # predicted_next_homo_latent_state, mean, logvar, predicted_reward, predicted_done \
         #     = self.transition_model(homo_latent_state, action)
+        predicted_next_homo_latent_state, predicted_reward, predicted_done \
+            = self.transition_model(homo_latent_state, action)
 
         # Make homomorphism next state
         predicted_next_state = torch.cat(
@@ -602,10 +602,10 @@ class WorldModel(nn.Module):
 
         # Predict the next latent state and reward with the transition model
         action = F.one_hot(action, self.num_actions).type(torch.float)
-        predicted_next_homo_latent_state, mean, logvar, predicted_reward, predicted_done \
-            = self.transition_model(homo_latent_state, action)
-        # predicted_next_homo_latent_state, predicted_reward, predicted_done \
+        # predicted_next_homo_latent_state, mean, logvar, predicted_reward, predicted_done \
         #     = self.transition_model(homo_latent_state, action)
+        predicted_next_homo_latent_state, predicted_reward, predicted_done \
+            = self.transition_model(homo_latent_state, action)
 
         # Make homomorphism next state
         predicted_latent_next_state = torch.cat(
@@ -643,7 +643,7 @@ class WorldModel(nn.Module):
         # latent_transition_loss_mae = self.mae_loss(homo_latent_next_state, predicted_next_homo_latent_state)
         # latent_transition_loss = latent_transition_loss_mse  # + latent_transition_loss_mae
 
-        kl_loss = -0.5 * torch.sum(1 + logvar - mean.pow(2) - logvar.exp())  # * 0.1
+        # kl_loss = -0.5 * torch.sum(1 + logvar - mean.pow(2) - logvar.exp())  # * 0.1
         # vae_loss = latent_transition_loss + 0.1 * kl_loss
 
         # --------------------
@@ -660,7 +660,7 @@ class WorldModel(nn.Module):
         # Total Loss
         # --------------------
         # total_loss = vae_loss + reward_loss + generator_loss + done_loss
-        total_loss = reconstruction_loss + reward_loss + done_loss + encoder_reconstruction_loss + kl_loss * 0.1
+        total_loss = reconstruction_loss + reward_loss + done_loss + encoder_reconstruction_loss  # + kl_loss * 0.1
         self.optimizer.zero_grad()
         total_loss.backward()
         self.optimizer.step()
@@ -670,7 +670,7 @@ class WorldModel(nn.Module):
             "reconstruction_loss": reconstruction_loss.detach().cpu().item(),
             "reconstruction_mae_loss": reconstruction_mae_loss.detach().cpu().item(),
             "encoder_reconstruction_loss": encoder_reconstruction_loss.detach().cpu().item(),
-            "kl_loss": kl_loss.detach().cpu().item(),
+            # "kl_loss": kl_loss.detach().cpu().item(),
             "reward_loss": reward_loss.detach().cpu().item(),
             "done_loss": done_loss.detach().cpu().item(),
             "total_loss": total_loss.detach().cpu().item(),
@@ -773,10 +773,10 @@ class WorldModel(nn.Module):
 if __name__ == '__main__':
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    session_dir = r"./experiments/full-vae-world_model-door_key"
+    session_dir = r"./experiments/full-world_model-door_key"
     dataset_samples = int(1.5e4)
     dataset_repeat_each_epoch = 5
-    num_epochs = 50
+    num_epochs = 100
     batch_size = 32
     lr = 1e-4
     num_parallel = 6
@@ -787,9 +787,9 @@ if __name__ == '__main__':
     movement_augmentation = 6
 
     encoder_decoder_net_arch = [
+        (16, 3, 2, 1),
         (32, 3, 2, 1),
         (64, 3, 2, 1),
-        (128, 3, 1, 1),
     ]
 
     transition_model_conv_arch = [
@@ -803,12 +803,12 @@ if __name__ == '__main__':
             config = TaskConfig()
             config.name = f"door_key"
             config.rand_gen_shape = None
-            config.txt_file_path = f"./maps/door_key.txt"
+            config.txt_file_path = f"./maps/base_env.txt"
             config.custom_mission = "reach the goal"
-            config.minimum_display_size = 7
+            config.minimum_display_size = 14
             config.display_mode = "random"
-            config.random_rotate = False
-            config.random_flip = False
+            config.random_rotate = True
+            config.random_flip = True
             config.max_steps = 1024
             # config.start_pos = (5, 5)
             config.train_total_steps = 2.5e7

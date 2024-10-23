@@ -232,9 +232,15 @@ class Decoder(nn.Module):
         return self.decoder(latent_state)
 
 
-class TransitionModelVAE(nn.Module):
+class TransitionModel(nn.Module):
     def __init__(self, latent_shape, action_dim, conv_arch):
-        super(TransitionModelVAE, self).__init__()
+        """
+        Deterministic Transition Model based on CNN architecture.
+        :param latent_shape: Shape of the latent space (channels, height, width)
+        :param action_dim: Dimensionality of the action space (one-hot encoded)
+        :param conv_arch: Convolutional network architecture for the encoder and decoder, e.g., [(64, 4, 2, 1), (128, 4, 2, 1)]
+        """
+        super(TransitionModel, self).__init__()
         latent_channels, latent_height, latent_width = latent_shape
 
         self.action_dim = action_dim
@@ -260,12 +266,6 @@ class TransitionModelVAE(nn.Module):
 
         # Dynamically calculate the output shape after conv layers
         self.output_shape = self._get_output_shape(latent_shape)
-
-        # Single convolution layer to generate both mean and logvar
-        self.conv_mean_logvar = nn.Conv2d(self.output_shape[0], self.output_shape[0] * 2, kernel_size=3, padding=1)
-
-        # Adaptive pooling if needed
-        self.adaptive_pool = nn.AdaptiveAvgPool2d((1, 1))
 
         # Deconvolutional layers
         deconv_layers = []
@@ -328,18 +328,51 @@ class TransitionModelVAE(nn.Module):
         x = self.initial_conv(x)
         x = self.conv_encoder(x)
 
+        # Process through decoder
+        z_next_decoded = self.deconv_decoder(x)
+        z_next_decoded = F.sigmoid(z_next_decoded)  # Sigmoid activation for output scaling
+
+        # Reward and done prediction
+        x = self.reward_done_conv(x)
+        reward_pred = self.reward_predictor(x)
+        done_pred = self.done_predictor(x)
+
+        return z_next_decoded, reward_pred, done_pred
+
+
+class TransitionModelVAE(TransitionModel):
+    def __init__(self, latent_shape, action_dim, conv_arch):
+        """
+        VAE-based Transition Model, inheriting from the deterministic Transition Model.
+        """
+        super(TransitionModelVAE, self).__init__(latent_shape, action_dim, conv_arch)
+
+        # Overwrite the conv_mean_logvar layer to generate both mean and logvar
+        self.conv_mean_logvar = nn.Conv2d(self.output_shape[0], self.output_shape[0] * 2, kernel_size=3, padding=1)
+
+    def forward(self, latent_state, action):
+        batch_size, latent_channels, latent_height, latent_width = latent_state.shape
+
+        # Reshape action to match latent state dimensions
+        action_reshaped = action.view(batch_size, self.action_dim, 1, 1).expand(batch_size, self.action_dim, latent_height, latent_width)
+        x = torch.cat([latent_state, action_reshaped], dim=1)
+
+        # Process through encoder
+        x = self.initial_conv(x)
+        x = self.conv_encoder(x)
+
         # Generate mean and logvar
         mean_logvar = self.conv_mean_logvar(x)
         mean, logvar = torch.split(mean_logvar, self.output_shape[0], dim=1)
 
-        # Reparameterization trick
+        # Reparameterization trick (mean + eps * std)
         std = torch.exp(0.5 * logvar)
         eps = torch.randn_like(std)
         z_next = mean + eps * std
 
         # Process through decoder
         z_next_decoded = self.deconv_decoder(z_next)
-        z_next_decoded = F.sigmoid(z_next_decoded)
+        z_next_decoded = F.sigmoid(z_next_decoded)  # Sigmoid activation for output scaling
 
         # Reward and done prediction
         x = self.reward_done_conv(x)

@@ -716,11 +716,11 @@ if __name__ == '__main__':
 
     session_dir = r"./experiments/full-world_model-door_key"
     dataset_samples = int(1.5e4)
-    dataset_repeat_each_epoch = 1
-    num_epochs = 75
+    dataset_repeat_each_epoch = 5
+    num_epochs = 100
     batch_size = 32
     lr = 1e-4
-    num_parallel = 4
+    num_parallel = 6
 
     latent_shape = (12, 32, 32)  # channel, height, width
     num_homomorphism_channels = 8

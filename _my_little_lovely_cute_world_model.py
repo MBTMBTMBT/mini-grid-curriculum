@@ -601,7 +601,7 @@ class WorldModel(nn.Module):
         # Total Loss
         # --------------------
         # total_loss = vae_loss + reward_loss + generator_loss + done_loss
-        total_loss = reconstruction_loss + reward_loss + done_loss + encoder_reconstruction_loss  # + kl_loss
+        total_loss = reconstruction_loss + reward_loss + done_loss + encoder_reconstruction_loss + kl_loss
         self.optimizer.zero_grad()
         total_loss.backward()
         self.optimizer.step()

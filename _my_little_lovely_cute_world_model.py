@@ -48,8 +48,8 @@ class FlexibleThresholdedLoss(nn.Module):
         l2_weight: The weight for L2 loss in both thresholded and non-thresholded parts.
         threshold_weight: Weight for the thresholded loss part.
         non_threshold_weight: Weight for the non-thresholded loss part.
-        mse_clip_ratio: Apply Huber-style smooth clipping to MSE-based thresholded loss when it exceeds this ratio of the current MSE threshold.
-        mae_clip_ratio: Apply Huber-style smooth clipping to MAE-based thresholded loss when it exceeds this ratio of the current MAE threshold.
+        mse_clip_ratio: Skip applying MSE-based thresholded loss for pixels when the loss exceeds this ratio of the current MSE threshold.
+        mae_clip_ratio: Skip applying MAE-based thresholded loss for pixels when the loss exceeds this ratio of the current MAE threshold.
         """
         super(FlexibleThresholdedLoss, self).__init__()
         self.use_mse_threshold = use_mse_threshold

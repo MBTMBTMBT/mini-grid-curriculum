@@ -831,7 +831,7 @@ if __name__ == '__main__':
     session_dir = r"./experiments/world_model-door_key"
     dataset_samples = int(1e4)
     dataset_repeat_each_epoch = 10
-    train_ae_epochs = 15
+    train_ae_epochs = 10
     train_trvae_epochs = 50
     batch_size = 32
     ae_lr = 5e-4

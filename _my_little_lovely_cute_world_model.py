@@ -584,7 +584,7 @@ class WorldModel(nn.Module):
         # latent_transition_loss_mae = self.mae_loss(homo_latent_next_state, predicted_next_homo_latent_state)
         # latent_transition_loss = latent_transition_loss_mse  # + latent_transition_loss_mae
 
-        kl_loss = -0.5 * torch.sum(1 + logvar - mean.pow(2) - logvar.exp()) * 0.1
+        # kl_loss = -0.5 * torch.sum(1 + logvar - mean.pow(2) - logvar.exp()) * 0.1
         # vae_loss = latent_transition_loss + 0.1 * kl_loss
 
         # --------------------
@@ -611,7 +611,7 @@ class WorldModel(nn.Module):
             "reconstruction_loss": reconstruction_loss.detach().cpu().item(),
             "reconstruction_mae_loss": reconstruction_mae_loss.detach().cpu().item(),
             "encoder_reconstruction_loss": encoder_reconstruction_loss.detach().cpu().item(),
-            "kl_loss": kl_loss.detach().cpu().item(),
+            # "kl_loss": kl_loss.detach().cpu().item(),
             "reward_loss": reward_loss.detach().cpu().item(),
             "done_loss": done_loss.detach().cpu().item(),
             "total_loss": total_loss.detach().cpu().item(),

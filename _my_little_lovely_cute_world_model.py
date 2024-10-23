@@ -37,7 +37,7 @@ action_dict = {
 class FlexibleThresholdedLoss(nn.Module):
     def __init__(self, use_mse_threshold=False, use_mae_threshold=True, mse_threshold=None, mae_threshold=None,
                  reduction='mean', l1_weight=1.0, l2_weight=1.0, threshold_weight=1.0, non_threshold_weight=1.0,
-                 mse_clip_ratio=None, mae_clip_ratio=5e3):
+                 mse_clip_ratio=None, mae_clip_ratio=1e1):
         """
         use_mse_threshold: Whether to apply a threshold to L2 (MSE)-based loss.
         use_mae_threshold: Whether to apply a threshold to L1-based loss.
@@ -69,44 +69,49 @@ class FlexibleThresholdedLoss(nn.Module):
         pixel_diff = torch.abs(input_img - target_img)  # For L1
         pixel_diff_squared = (input_img - target_img) ** 2  # For L2 (MSE)
 
-        # Part 1: L2 (MSE)-based threshold handling with optional clipping
+        # General mean for normalization
+        general_mean = pixel_diff.mean()
+
+        # Part 1: L2 (MSE)-based threshold handling with optional normalization
         mse_loss = pixel_diff_squared.mean()  # MSE (L2) loss
         if self.use_mse_threshold:
             if self.mse_threshold is None:
                 self.mse_threshold = mse_loss  # Set adaptive threshold based on MSE
 
-            # Apply range: threshold <= pixel_diff <= ratio * mean
-            if self.mse_clip_ratio is not None:
-                mse_upper_limit = self.mse_clip_ratio * mse_loss  # Clip ratio * mean
-                mse_thresholded_diff = pixel_diff_squared[(pixel_diff_squared >= self.mse_threshold) & (pixel_diff_squared <= mse_upper_limit)]
-            else:
-                mse_thresholded_diff = pixel_diff_squared[pixel_diff_squared >= self.mse_threshold]
+            # Filter values based on threshold
+            mse_thresholded_diff = pixel_diff_squared[pixel_diff_squared >= self.mse_threshold]
 
-            # Calculate mean of filtered values or 0 if no values are above the threshold
+            # Calculate the thresholded loss and normalize if necessary
             if mse_thresholded_diff.numel() > 0:
                 mse_thresholded_loss = mse_thresholded_diff.mean()
+                if self.mse_clip_ratio is not None:
+                    clip_value = self.mse_clip_ratio * general_mean
+                    # Normalize the loss if it exceeds the clip_value
+                    if mse_thresholded_loss > clip_value:
+                        mse_thresholded_loss = clip_value * mse_thresholded_loss / mse_thresholded_loss.detach()
             else:
                 mse_thresholded_loss = torch.tensor(0.0, device=pixel_diff.device)
         else:
             # No thresholding, use all squared differences for L2 (MSE)
             mse_thresholded_loss = pixel_diff_squared.mean()
 
-        # Part 2: L1-based threshold handling with optional clipping
+        # Part 2: L1-based threshold handling with optional normalization
         mae_loss = pixel_diff.mean()  # L1 (absolute difference) loss
         if self.use_mae_threshold:
             if self.mae_threshold is None:
                 self.mae_threshold = mae_loss  # Set adaptive threshold based on MAE
 
-            # Apply range: threshold <= pixel_diff <= ratio * mean
-            if self.mae_clip_ratio is not None:
-                mae_upper_limit = self.mae_clip_ratio * mae_loss  # Clip ratio * mean
-                mae_thresholded_diff = pixel_diff[(pixel_diff >= self.mae_threshold) & (pixel_diff <= mae_upper_limit)]
-            else:
-                mae_thresholded_diff = pixel_diff[pixel_diff >= self.mae_threshold]
+            # Filter values based on threshold
+            mae_thresholded_diff = pixel_diff[pixel_diff >= self.mae_threshold]
 
-            # Calculate mean of filtered values or 0 if no values are above the threshold
+            # Calculate the thresholded loss and normalize if necessary
             if mae_thresholded_diff.numel() > 0:
                 mae_thresholded_loss = mae_thresholded_diff.mean()
+                if self.mae_clip_ratio is not None:
+                    clip_value = self.mae_clip_ratio * general_mean
+                    # Normalize the loss if it exceeds the clip_value
+                    if mae_thresholded_loss > clip_value:
+                        mae_thresholded_loss = clip_value * mae_thresholded_loss / mae_thresholded_loss.detach()
             else:
                 mae_thresholded_loss = torch.tensor(0.0, device=pixel_diff.device)
         else:

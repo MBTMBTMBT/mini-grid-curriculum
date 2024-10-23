@@ -382,6 +382,126 @@ class TransitionModelVAE(TransitionModel):
         return z_next_decoded, mean, logvar, reward_pred, done_pred
 
 
+class VectorQuantizer(nn.Module):
+    def __init__(self, num_embeddings, embedding_dim, commitment_cost=0.25):
+        """
+        Vector Quantizer for VQ-VAE
+        :param num_embeddings: Number of vectors in the codebook
+        :param embedding_dim: Dimensionality of the embeddings
+        :param commitment_cost: Weight for the commitment loss
+        """
+        super(VectorQuantizer, self).__init__()
+        self.num_embeddings = num_embeddings
+        self.embedding_dim = embedding_dim
+        self.commitment_cost = commitment_cost
+
+        # Embedding table
+        self.embedding = nn.Parameter(torch.randn(num_embeddings, embedding_dim))
+
+    def forward(self, inputs):
+        # Flatten inputs except the last dimension
+        flat_inputs = inputs.view(-1, self.embedding_dim)
+
+        # Compute L2 distances between input vectors and embeddings
+        distances = torch.sum(flat_inputs ** 2, dim=1, keepdim=True) + \
+                    torch.sum(self.embedding ** 2, dim=1) - \
+                    2 * torch.matmul(flat_inputs, self.embedding.t())
+
+        # Get the closest embedding index
+        encoding_indices = torch.argmin(distances, dim=1).unsqueeze(1)
+
+        # Quantize by replacing with closest embedding
+        quantized = F.embedding(encoding_indices, self.embedding).view_as(inputs)
+
+        # Compute losses
+        embedding_loss = F.mse_loss(quantized.detach(), inputs)
+        commitment_loss = self.commitment_cost * F.mse_loss(inputs.detach(), quantized)
+        quantized = inputs + (quantized - inputs).detach()
+
+        return quantized, encoding_indices, embedding_loss + commitment_loss
+
+
+class TransitionModelVQVAE(TransitionModel):
+    def __init__(self, latent_shape, action_dim, conv_arch, num_embeddings=512):
+        super(TransitionModelVQVAE, self).__init__(latent_shape, action_dim, conv_arch)
+        embedding_dim = latent_shape[0]  # embedding_dim based on the output channels of decoder
+
+        # Vector quantizer
+        self.vector_quantizer = VectorQuantizer(num_embeddings, embedding_dim)
+
+    def forward(self, latent_state, action):
+        batch_size, latent_channels, latent_height, latent_width = latent_state.shape
+
+        # Reshape action to match latent state dimensions
+        action_reshaped = action.view(batch_size, self.action_dim, 1, 1).expand(batch_size, self.action_dim,
+                                                                                latent_height, latent_width)
+        x = torch.cat([latent_state, action_reshaped], dim=1)
+
+        # Process through encoder
+        x = self.initial_conv(x)
+        x = self.conv_encoder(x)
+
+        # Process through decoder
+        z_next_decoded = self.deconv_decoder(x)
+
+        # Apply vector quantization on the output of decoder
+        z_quantized, _, vq_loss = self.vector_quantizer(z_next_decoded)
+
+        # Apply Sigmoid to limit the output range between [0, 1]
+        z_quantized = torch.sigmoid(z_quantized)
+
+        # Reward and done predictions
+        reward_pred = self.reward_predictor(x)
+        done_pred = self.done_predictor(x)
+
+        return z_quantized, reward_pred, done_pred, vq_loss
+
+
+class TransitionModelVQVAEVAE(TransitionModelVAE):
+    def __init__(self, latent_shape, action_dim, conv_arch, num_embeddings=512):
+        super(TransitionModelVQVAEVAE, self).__init__(latent_shape, action_dim, conv_arch)
+        embedding_dim = latent_shape[0]  # embedding_dim based on the output channels of decoder
+
+        # Vector quantizer
+        self.vector_quantizer = VectorQuantizer(num_embeddings, embedding_dim)
+
+    def forward(self, latent_state, action):
+        batch_size, latent_channels, latent_height, latent_width = latent_state.shape
+
+        # Reshape action to match latent state dimensions
+        action_reshaped = action.view(batch_size, self.action_dim, 1, 1).expand(batch_size, self.action_dim,
+                                                                                latent_height, latent_width)
+        x = torch.cat([latent_state, action_reshaped], dim=1)
+
+        # Process through encoder
+        x = self.initial_conv(x)
+        x = self.conv_encoder(x)
+
+        # Generate mean and logvar for VAE
+        mean_logvar = self.conv_mean_logvar(x)
+        mean, logvar = torch.split(mean_logvar, self.output_shape[0], dim=1)
+
+        # Reparameterization trick
+        std = torch.exp(0.5 * logvar)
+        eps = torch.randn_like(std)
+        z_next = mean + eps * std
+
+        # Process through decoder
+        z_next_decoded = self.deconv_decoder(z_next)
+
+        # Apply vector quantization on the output of decoder
+        z_quantized, _, vq_loss = self.vector_quantizer(z_next_decoded)
+
+        # Apply Sigmoid to limit the output range between [0, 1]
+        z_quantized = torch.sigmoid(z_quantized)
+
+        # Reward and done predictions
+        reward_pred = self.reward_predictor(x)
+        done_pred = self.done_predictor(x)
+
+        return z_quantized, mean, logvar, reward_pred, done_pred, vq_loss
+
+
 class SimpleTransitionModel(nn.Module):
     def __init__(self, latent_shape, action_dim, conv_arch):
         """

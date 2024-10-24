@@ -1024,14 +1024,18 @@ class EnsembleTransitionModel(nn.Module):
         # Return the selected one-hot encoded actions
         return [action_space[idx] for idx in selected_action_indices]
 
-def select_action_integers(self, latent_states, action_space, temperature=1.0):
+def select_action_integers(self, latent_states, num_actions, temperature=1.0):
     """
     Call select_action and return the actions as integer indices for a batch of latent states.
     :param latent_states: Current latent states (batch_size, latent_channels, latent_height, latent_width)
-    :param action_space: Available actions (list of one-hot encoded actions)
+    :param num_actions: Number of possible actions (integer)
     :param temperature: The temperature value (0-inf) controlling randomness in action selection
     :return: List of selected action indices (integer for each sample in the batch)
     """
+    # Generate one-hot encoded actions based on num_actions
+    action_space = [np.eye(num_actions)[i] for i in range(num_actions)]  # Creates one-hot encoded actions
+
+    # Call select_action to get the selected actions in one-hot encoding
     selected_actions = self.select_action(latent_states, action_space, temperature)
 
     # Convert each selected one-hot action back to its corresponding integer index
@@ -1042,7 +1046,7 @@ def select_action_integers(self, latent_states, action_space, temperature=1.0):
 
 class WorldModelAgentDataset(GymDataset):
     def __init__(self, data_size: int, repeat: int = 1, movement_augmentation: int = 0):
-        super().__init__(None, data_size, repeat)
+        super().__init__(None, data_size, repeat, movement_augmentation)
 
     def resample(self, env: VecEnv = None, action_selection_func: Optional[Callable[[np.ndarray, int, float], np.ndarray]] = None, temperature=1.0):
         """Resample the data by interacting with the environment and collecting new data for one epoch."""
@@ -1130,7 +1134,18 @@ class WorldModelAgent(WorldModel):
         self.ensemble_num_models = ensemble_num_models
         self.ensemble_net_arch = ensumble_net_arch
         self.ensemble_lr = ensumble_lr
+        self.ensemble_model = EnsembleTransitionModel(latent_shape, num_actions, ensumble_net_arch,)
         self.sample_counter = 0
+
+    def _select_action_integers(self, state, num_actions, temperature=1.0):
+        state = torch.tensor(state)
+        state = state.to(device)
+        with torch.no_grad():
+            # Encode the current and next state
+            latent_state = self.encoder(state)
+            # Make homomorphism state
+            homo_latent_state = latent_state[:, 0:self.num_homomorphism_channels, :, :]
+        return self.ensemble_model.select_action_integers(homo_latent_state, num_actions, temperature)
 
 
 if __name__ == '__main__':

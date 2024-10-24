@@ -2,6 +2,7 @@ import io
 import os
 from typing import Tuple, List
 
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -888,6 +889,163 @@ class WorldModel(nn.Module):
                             plt.close(fig)
 
         return avg_loss, start_num_batches
+
+
+class EnsembleTransitionModel(nn.Module):
+    def __init__(self, latent_shape, action_dim, conv_arch, num_models=5, epsilon=0.1):
+        """
+        Ensemble of SimpleTransitionModel to measure uncertainty for exploration.
+        :param latent_shape: Shape of the latent space (channels, height, width)
+        :param action_dim: Dimensionality of the action space (one-hot encoded)
+        :param conv_arch: Convolutional architecture for the transition model
+        :param num_models: Number of models in the ensemble
+        :param epsilon: Epsilon for epsilon-greedy exploration (for random action selection)
+        """
+        super(EnsembleTransitionModel, self).__init__()
+        self.num_models = num_models
+        self.models = nn.ModuleList([SimpleTransitionModel(latent_shape, action_dim, conv_arch) for _ in range(num_models)])
+        self.epsilon = epsilon
+
+    def compute_minibatch_loss(self, latent_state, action, next_latent_state, reward, done, loss_fn):
+        """
+        Train all models in the ensemble on the provided data.
+        :param latent_state: Current latent state (batch_size, latent_channels, latent_height, latent_width)
+        :param action: Actions taken (batch_size, action_dim)
+        :param next_latent_state: True next latent state (batch_size, latent_channels, latent_height, latent_width)
+        :param reward: Reward received (batch_size, 1)
+        :param done: Done flag indicating episode termination (batch_size, 1)
+        :param loss_fn: Loss function to be used for training
+        """
+        device = next(self.models[0].parameters()).device
+        latent_state = latent_state.to(device)
+        action = action.to(device)
+        reward = reward.to(device)
+        next_latent_state = next_latent_state.to(device)
+        done = done.to(device)
+
+        total_loss = torch.tensor(0.0).to(device)
+        for model in self.models:
+            # Forward pass
+            z_next_pred, reward_pred, done_pred = model(latent_state, action)
+
+            # Compute losses: next state prediction loss, reward prediction loss, done prediction loss
+            state_loss = loss_fn(z_next_pred, next_latent_state)
+            reward_loss = loss_fn(reward_pred, reward)
+            done_loss = loss_fn(done_pred, done)
+
+            # Total loss
+            total_loss += state_loss + reward_loss + done_loss
+
+        return total_loss / self.num_models
+
+    def compute_uncertainty(self, latent_state, action):
+        """
+        Compute uncertainty ranking for the given state-action pair.
+        :param latent_state: Current latent state (batch_size, latent_channels, latent_height, latent_width)
+        :param action: Action taken (batch_size, action_dim)
+        :return: Combined uncertainty for next latent state, reward, and done predictions (normalized).
+        """
+        device = next(self.models[0].parameters()).device
+        latent_state = latent_state.to(device)
+        action = action.to(device)
+
+        state_predictions = []
+        reward_predictions = []
+        done_predictions = []
+
+        # Gather predictions from all models
+        with torch.no_grad():
+            for model in self.models:
+                z_next_pred, reward_pred, done_pred = model(latent_state, action)
+                state_predictions.append(z_next_pred)
+                reward_predictions.append(reward_pred)
+                done_predictions.append(done_pred)
+
+        # Stack predictions to compute variance (uncertainty)
+        state_predictions = torch.stack(state_predictions,
+                                        dim=0)  # Shape: (num_models, batch_size, latent_channels, height, width)
+        reward_predictions = torch.stack(reward_predictions, dim=0)  # Shape: (num_models, batch_size, 1)
+        done_predictions = torch.stack(done_predictions, dim=0)  # Shape: (num_models, batch_size, 1)
+
+        # Compute variances for next state, reward, and done
+        state_uncertainty = state_predictions.var(
+            dim=0).mean().item()  # Average variance over all elements in the latent state
+        reward_uncertainty = reward_predictions.var(dim=0).mean().item()  # Variance of reward predictions
+        done_uncertainty = done_predictions.var(dim=0).mean().item()  # Variance of done predictions
+
+        # Normalize the uncertainties (min-max normalization)
+        uncertainties = [state_uncertainty, reward_uncertainty, done_uncertainty]
+        min_val = min(uncertainties)
+        max_val = max(uncertainties)
+        if max_val - min_val == 0:
+            normalized_uncertainties = [1.0] * len(uncertainties)  # If all uncertainties are the same, set them to 1.0
+        else:
+            normalized_uncertainties = [(u - min_val) / (max_val - min_val) for u in uncertainties]
+
+        # Combine the normalized uncertainties
+        combined_uncertainty = sum(normalized_uncertainties)
+
+        return combined_uncertainty
+
+    def select_action(self, latent_state, action_space, temperature=1.0):
+        """
+        Select an action based on uncertainty-driven exploration using softmax with mapped temperature.
+        :param latent_state: Current latent state (batch_size, latent_channels, latent_height, latent_width)
+        :param action_space: Available actions (list of one-hot encoded actions)
+        :param temperature: The temperature value (0-inf) controlling randomness in action selection
+        :return: Selected action (one-hot encoded)
+        """
+        # Epsilon-greedy: with probability epsilon, choose random action
+        if np.random.rand() < self.epsilon:
+            return np.random.choice(action_space)
+
+        # Compute uncertainty for each action
+        uncertainties = []
+        for action in action_space:
+            action_tensor = torch.FloatTensor(action).unsqueeze(0)
+            uncertainty = self.compute_uncertainty(latent_state, action_tensor)
+            uncertainties.append(uncertainty)
+
+        uncertainties = torch.tensor(uncertainties)
+
+        # Map temperature in the range [0, inf] for softmax scaling
+        actual_temperature = temperature if temperature > 0 else 1e-5  # Ensure temperature is not zero
+
+        # Apply temperature scaling for softmax
+        scaled_uncertainties = uncertainties / actual_temperature
+        probabilities = torch.softmax(scaled_uncertainties, dim=0).numpy()
+
+        # Select action based on the calculated softmax probabilities
+        selected_action_idx = np.random.choice(len(action_space), p=probabilities)
+        return action_space[selected_action_idx]
+
+
+class WorldModelAgent(WorldModel):
+    def __init__(
+            self,
+            latent_shape: Tuple[int, int, int],
+            num_homomorphism_channels: int,
+            obs_shape: Tuple[int, int, int],
+            num_actions: int,
+            cnn_net_arch: List[Tuple[int, int, int, int]],
+            transition_model_conv_arch: List[Tuple[int, int, int, int]],
+            lr: float = 1e-4,
+            dataset_size: int = 4096,
+            dataset_repeat_times: int = 10,
+            ensemble_num_models: int = 4,
+            ensumble_net_arch: List[Tuple[int, int, int, int]] = None,
+            ensumble_lr: float = 1e-4,
+    ):
+        super(WorldModelAgent, self).__init__(
+            latent_shape,
+            num_homomorphism_channels,
+            obs_shape,
+            num_actions,
+            cnn_net_arch,
+            transition_model_conv_arch,
+            lr,
+        )
+        pass
 
 
 if __name__ == '__main__':

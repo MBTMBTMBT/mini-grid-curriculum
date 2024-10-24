@@ -934,7 +934,7 @@ class EnsembleTransitionModel(nn.Module):
 
             # Compute losses: next state prediction loss, reward prediction loss, done prediction loss
             state_loss = loss_fn(z_next_pred, next_latent_state)
-            reward_loss = loss_fn(reward_pred, reward)
+            reward_loss = loss_fn(reward_pred.squeeze(), reward)
             done_loss = F.binary_cross_entropy(done_pred.squeeze(), done.float())
 
             # Total loss

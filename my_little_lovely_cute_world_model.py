@@ -1241,11 +1241,18 @@ class WorldModelAgent(WorldModel):
 
         total_num_epochs = total_collected_samples // self.dataset_size
         for epoch in range(start_epoch, total_num_epochs):
+            print(f"Start epoch {epoch + 1} / {total_num_epochs}:")
+
+            print(
+                f"Resampling dataset samples: {self.sample_counter + 1}+{self.dataset.data_size} / {total_collected_samples}..."
+            )
             # sample dataset
             self.dataset.resample(env, self._select_action_integers, temperature=1.0)
+            self.sample_counter += self.dataset.data_size
 
+            print("Starting training...")
             # train on epoch
-            loss, _ = self.train_epoch(self.dataloader, log_writer, start_num_batches=self.sample_counter)
+            loss, _ = self.train_epoch(self.dataloader, log_writer, start_num_batches=epoch * len(self.dataloader))
 
             if loss < min_loss:
                 min_loss = loss
@@ -1352,6 +1359,108 @@ def train_world_model():
             min_loss = loss
             world_model.save_model(epoch, loss, is_best=True, save_dir=os.path.join(session_dir, 'models'))
         world_model.save_model(epoch, loss, save_dir=os.path.join(session_dir, 'models'))
+
+
+def train_world_model_agent():
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    session_dir = r"./experiments/world_model_agent-door_key"
+    dataset_samples = 4096
+    dataset_repeat_each_epoch = 20
+    total_samples = 100
+    batch_size = 32
+    lr = 1e-4
+    num_parallel = 6
+
+    latent_shape = (8, 24, 24)  # channel, height, width
+    num_homomorphism_channels = 5
+
+    movement_augmentation = 6
+
+    encoder_decoder_net_arch = [
+        (16, 3, 2, 1),
+        (32, 3, 2, 1),
+        (64, 3, 2, 1),
+    ]
+
+    transition_model_conv_arch = [
+        (64, 3, 1, 1),
+        (64, 3, 1, 1),
+    ]
+
+    configs = []
+    for _ in range(num_parallel):
+        # for i in range(1, 7):
+        config = TaskConfig()
+        config.name = f"door_key"
+        config.rand_gen_shape = None
+        config.txt_file_path = f"./maps/base_env.txt"
+        config.custom_mission = "reach the goal"
+        config.minimum_display_size = 10
+        config.display_mode = "random"
+        config.random_rotate = True
+        config.random_flip = True
+        config.max_steps = 1024
+        # config.start_pos = (5, 5)
+        config.train_total_steps = 2.5e7
+        config.difficulty_level = 0
+        config.add_random_door_key = False
+        configs.append(config)
+
+    max_minimum_display_size = 0
+    for config in configs:
+        if config.minimum_display_size > max_minimum_display_size:
+            max_minimum_display_size = config.minimum_display_size
+
+    venv = SubprocVecEnv([
+        lambda: make_env(each_task_config, FullyObsImageWrapper, max_minimum_display_size)
+        for each_task_config in configs
+    ])
+
+    dataset = GymDataset(venv, data_size=dataset_samples, repeat=dataset_repeat_each_epoch,
+                         movement_augmentation=movement_augmentation)
+    print(len(dataset))
+    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, drop_last=True)
+    print(len(dataloader))
+
+    log_dir = os.path.join(session_dir, "logs")
+    os.makedirs(log_dir, exist_ok=True)
+    log_writer = SummaryWriter(log_dir=log_dir)
+
+    world_model = WorldModel(
+        latent_shape=latent_shape,
+        num_homomorphism_channels=num_homomorphism_channels,
+        obs_shape=venv.observation_space.shape,
+        num_actions=venv.action_space.n,
+        cnn_net_arch=encoder_decoder_net_arch,
+        transition_model_conv_arch=transition_model_conv_arch,
+        lr=lr,
+    ).to(device)
+
+    min_loss = float('inf')
+    start_epoch = 0
+    try:
+        _, min_loss = world_model.load_model(save_dir=os.path.join(session_dir, 'models'), best=True)
+        start_epoch, _ = world_model.load_model(save_dir=os.path.join(session_dir, 'models'))
+        start_epoch += 1
+    except FileNotFoundError:
+        pass
+
+    for epoch in range(start_epoch, num_epochs):
+        print(f"Start epoch {epoch + 1} / {num_epochs}:")
+        print("Resampling dataset...")
+        dataset.resample()
+        print("Starting training...")
+        loss, _ = world_model.train_epoch(
+            dataloader,
+            log_writer,
+            start_num_batches=epoch * len(dataloader),
+        )
+        if loss < min_loss:
+            min_loss = loss
+            world_model.save_model(epoch, loss, is_best=True, save_dir=os.path.join(session_dir, 'models'))
+        world_model.save_model(epoch, loss, save_dir=os.path.join(session_dir, 'models'))
+
 
 if __name__ == '__main__':
     pass

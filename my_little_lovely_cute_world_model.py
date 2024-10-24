@@ -1118,8 +1118,9 @@ class WorldModelAgent(WorldModel):
             dataset_size: int = 4096,
             dataset_repeat_times: int = 10,
             ensemble_num_models: int = 4,
-            ensumble_net_arch: List[Tuple[int, int, int, int]] = None,
-            ensumble_lr: float = 1e-4,
+            ensemble_net_arch: List[Tuple[int, int, int, int]] = None,
+            ensemble_lr: float = 1e-4,
+            ensemble_epsilon: float = 0.1
     ):
         super(WorldModelAgent, self).__init__(
             latent_shape,
@@ -1131,10 +1132,14 @@ class WorldModelAgent(WorldModel):
             lr,
         )
         self.dataset = WorldModelAgentDataset(dataset_size, dataset_repeat_times)
-        self.ensemble_num_models = ensemble_num_models
-        self.ensemble_net_arch = ensumble_net_arch
-        self.ensemble_lr = ensumble_lr
-        self.ensemble_model = EnsembleTransitionModel(latent_shape, num_actions, ensumble_net_arch,)
+        self.ensemble_model = EnsembleTransitionModel(
+            latent_shape,
+            num_actions,
+            ensemble_net_arch,
+            num_models=ensemble_num_models,
+            epsilon=ensemble_epsilon,
+        )
+        self.ensemble_optimizer = optim.Adam(self.ensemble_model.parameters(), lr=ensemble_lr)
         self.sample_counter = 0
 
     def _select_action_integers(self, state, num_actions, temperature=1.0):

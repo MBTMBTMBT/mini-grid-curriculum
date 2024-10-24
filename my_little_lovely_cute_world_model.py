@@ -1139,6 +1139,7 @@ class WorldModelAgent(WorldModel):
             ensemble_num_models: int = 4,
             ensemble_net_arch: List[Tuple[int, int, int, int]] = None,
             ensemble_lr: float = 1e-4,
+            dataset_repeat_times_ensemble: int = 5,
             ensemble_epsilon: float = 0.1,
             batch_size: int = 32,
     ):
@@ -1157,7 +1158,9 @@ class WorldModelAgent(WorldModel):
             lr,
         )
         self.dataset = WorldModelAgentDataset(samples_per_epoch, dataset_repeat_times)
+        self.dataset_ensemble = WorldModelAgentDataset(samples_per_epoch, dataset_repeat_times_ensemble)
         self.dataloader = DataLoader(self.dataset, batch_size=batch_size, shuffle=True)
+        self.dataloader_ensemble = DataLoader(self.dataset_ensemble, batch_size=batch_size, shuffle=True)
         self.ensemble_model = EnsembleTransitionModel(
             (num_homomorphism_channels, latent_shape[1], latent_shape[2]),
             num_actions,
@@ -1217,16 +1220,16 @@ class WorldModelAgent(WorldModel):
             homo_latent_state = latent_state[:, 0:self.num_homomorphism_channels, :, :]
         return self.ensemble_model.select_action_integers(homo_latent_state, num_actions, temperature)
 
-    def train_epoch(self, dataloader: DataLoader, log_writer: SummaryWriter, start_num_batches=0,):
+    def train_epoch(self, dataloader: DataLoader, dataloader_ensemble: DataLoader, log_writer: SummaryWriter, start_num_batches=0,):
         device = next(self.parameters()).device
 
         _avg_loss, _start_num_batches = super(WorldModelAgent, self).train_epoch(
             dataloader, log_writer, start_num_batches
         )
 
-        with tqdm(total=len(self.dataset), desc="Training Ensemble Models", unit="sample") as pbar:
+        with tqdm(total=len(self.dataset_ensemble), desc="Training Ensemble Models", unit="sample") as pbar:
             loss_sum = 0.0
-            for i, batch in enumerate(dataloader):
+            for i, batch in enumerate(dataloader_ensemble):
                 obs, actions, next_obs, rewards, dones = batch
                 state = obs.to(device)
                 actions = actions.to(device)
@@ -1275,6 +1278,7 @@ class WorldModelAgent(WorldModel):
             )
             # sample dataset
             self.dataset.resample(env, self._select_action_integers, temperature=1.0)
+            self.dataset_ensemble.data = self.dataset.data
             self.sample_counter += self.dataset.data_size
             avg_state_uncertainty = self.ensemble_model.total_state_uncertainty / self.ensemble_model.uncertainty_computation_count
             avg_reward_uncertainty = self.ensemble_model.total_reward_uncertainty / self.ensemble_model.uncertainty_computation_count
@@ -1287,7 +1291,7 @@ class WorldModelAgent(WorldModel):
 
             print("Starting training...")
             # train on epoch
-            loss, _ = self.train_epoch(self.dataloader, log_writer, start_num_batches=epoch * len(self.dataloader))
+            loss, _ = self.train_epoch(self.dataloader, self.dataloader_ensemble, log_writer, start_num_batches=epoch * len(self.dataloader))
 
             if loss < min_loss:
                 min_loss = loss
@@ -1402,6 +1406,7 @@ def train_world_model_agent():
     session_dir = r"./experiments/world_model_agent-door_key"
     dataset_samples = 4096
     dataset_repeat_each_epoch = 20
+    dataset_repeat_times_ensemble = 5
     total_samples = 4096 * 100
     ensemble_num_models = 8
     batch_size = 32
@@ -1466,7 +1471,8 @@ def train_world_model_agent():
         dataset_repeat_times = dataset_repeat_each_epoch,
         ensemble_num_models= ensemble_num_models,
         ensemble_net_arch = transition_model_conv_arch,
-        ensemble_lr = lr,
+        ensemble_lr=lr,
+        dataset_repeat_times_ensemble=dataset_repeat_times_ensemble,
         ensemble_epsilon = ensemble_epsilon,
         batch_size = batch_size,
     ).to(device)

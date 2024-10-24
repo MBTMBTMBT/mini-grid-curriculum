@@ -908,6 +908,17 @@ class EnsembleTransitionModel(nn.Module):
         self.epsilon = epsilon
         self.num_actions = action_dim
 
+        self.total_state_uncertainty = 0.0
+        self.total_reward_uncertainty = 0.0
+        self.total_done_uncertainty = 0.0
+        self.uncertainty_computation_count = 0
+
+    def reset_uncertainty(self):
+        self.total_state_uncertainty = 0.0
+        self.total_reward_uncertainty = 0.0
+        self.total_done_uncertainty = 0.0
+        self.uncertainty_computation_count = 0
+
     def compute_minibatch_loss(self, latent_state, action, next_latent_state, reward, done, loss_fn):
         """
         Train all models in the ensemble on the provided data.
@@ -972,10 +983,15 @@ class EnsembleTransitionModel(nn.Module):
         done_predictions = torch.stack(done_predictions, dim=0)  # Shape: (num_models, batch_size, 1)
 
         # Compute variances for next state, reward, and done
-        state_uncertainty = state_predictions.var(dim=0).mean(
+        state_uncertainty = state_predictions.std(dim=0).mean(
             dim=[1, 2, 3])  # Batch variance over all latent state dimensions
-        reward_uncertainty = reward_predictions.var(dim=0).mean(dim=1)  # Batch variance for reward predictions
-        done_uncertainty = done_predictions.var(dim=0).mean(dim=1)  # Batch variance for done predictions
+        reward_uncertainty = reward_predictions.std(dim=0).mean(dim=1)  # Batch variance for reward predictions
+        done_uncertainty = done_predictions.std(dim=0).mean(dim=1)  # Batch variance for done predictions
+
+        self.total_state_uncertainty += state_uncertainty.sum().cpu().item()
+        self.total_reward_uncertainty += reward_uncertainty.sum().cpu().item()
+        self.total_done_uncertainty += done_uncertainty.sum().cpu().item()
+        self.uncertainty_computation_count += 1
 
         # Normalize the uncertainties (min-max normalization) for the batch
         uncertainties = torch.stack([state_uncertainty, reward_uncertainty, done_uncertainty], dim=1)
@@ -1260,6 +1276,14 @@ class WorldModelAgent(WorldModel):
             # sample dataset
             self.dataset.resample(env, self._select_action_integers, temperature=1.0)
             self.sample_counter += self.dataset.data_size
+            avg_state_uncertainty = self.ensemble_model.total_state_uncertainty / self.ensemble_model.uncertainty_computation_count
+            avg_reward_uncertainty = self.ensemble_model.total_reward_uncertainty / self.ensemble_model.uncertainty_computation_count
+            avg_done_uncertainty = self.ensemble_model.total_done_uncertainty / self.ensemble_model.uncertainty_computation_count
+            self.ensemble_model.reset_uncertainty()
+            log_writer.add_scalar(f'state uncertainty', avg_state_uncertainty, epoch)
+            log_writer.add_scalar(f'reward uncertainty',avg_reward_uncertainty, epoch)
+            log_writer.add_scalar(f'done uncertainty', avg_done_uncertainty,epoch)
+            print(f"Average state uncertainty: {avg_state_uncertainty:.6f}, reward uncertainty: {avg_reward_uncertainty:.6f}, done uncertainty: {avg_done_uncertainty:.6f}")
 
             print("Starting training...")
             # train on epoch

@@ -1024,24 +1024,24 @@ class EnsembleTransitionModel(nn.Module):
         # Return the selected one-hot encoded actions
         return [action_space[idx] for idx in selected_action_indices]
 
-def select_action_integers(self, latent_states, num_actions, temperature=1.0):
-    """
-    Call select_action and return the actions as integer indices for a batch of latent states.
-    :param latent_states: Current latent states (batch_size, latent_channels, latent_height, latent_width)
-    :param num_actions: Number of possible actions (integer)
-    :param temperature: The temperature value (0-inf) controlling randomness in action selection
-    :return: List of selected action indices (integer for each sample in the batch)
-    """
-    # Generate one-hot encoded actions based on num_actions
-    action_space = [np.eye(num_actions)[i] for i in range(num_actions)]  # Creates one-hot encoded actions
+    def select_action_integers(self, latent_states, num_actions, temperature=1.0):
+        """
+        Call select_action and return the actions as integer indices for a batch of latent states.
+        :param latent_states: Current latent states (batch_size, latent_channels, latent_height, latent_width)
+        :param num_actions: Number of possible actions (integer)
+        :param temperature: The temperature value (0-inf) controlling randomness in action selection
+        :return: List of selected action indices (integer for each sample in the batch)
+        """
+        # Generate one-hot encoded actions based on num_actions
+        action_space = [np.eye(num_actions)[i] for i in range(num_actions)]  # Creates one-hot encoded actions
 
-    # Call select_action to get the selected actions in one-hot encoding
-    selected_actions = self.select_action(latent_states, action_space, temperature)
+        # Call select_action to get the selected actions in one-hot encoding
+        selected_actions = self.select_action(latent_states, action_space, temperature)
 
-    # Convert each selected one-hot action back to its corresponding integer index
-    selected_action_indices = [np.argmax(action) for action in selected_actions]
+        # Convert each selected one-hot action back to its corresponding integer index
+        selected_action_indices = [np.argmax(action) for action in selected_actions]
 
-    return selected_action_indices
+        return selected_action_indices
 
 
 class WorldModelAgentDataset(GymDataset):
@@ -1141,6 +1141,7 @@ class WorldModelAgent(WorldModel):
         )
         self.ensemble_optimizer = optim.Adam(self.ensemble_model.parameters(), lr=ensemble_lr)
         self.sample_counter = 0
+        self.batch_counter = 0
 
     def _select_action_integers(self, state, num_actions, temperature=1.0):
         state = torch.tensor(state)
@@ -1151,6 +1152,35 @@ class WorldModelAgent(WorldModel):
             # Make homomorphism state
             homo_latent_state = latent_state[:, 0:self.num_homomorphism_channels, :, :]
         return self.ensemble_model.select_action_integers(homo_latent_state, num_actions, temperature)
+
+    def train_epoch(self, dataloader: DataLoader, log_writer: SummaryWriter, start_num_batches=0,):
+        avg_loss, _start_num_batches = super(WorldModelAgent, self).train_epoch(
+            dataloader, log_writer, start_num_batches
+        )
+
+        with tqdm(total=len(self.dataset), desc="Training Ensemble Models", unit="sample") as pbar:
+            loss_sum = 0.0
+            for i, batch in enumerate(dataloader):
+                obs, actions, next_obs, rewards, dones = batch
+                state = state.to(device)
+                action = action.to(device)
+                reward = reward.to(device)
+                next_state = next_state.to(device)
+                done = done.to(device)
+                latent_state, next_latent_state = self.encoder(state), self.encoder(next_state)
+                ensemble_loss = self.ensemble_model.compute_minibatch_loss(
+                    latent_state, actions, rewards, next_latent_state, dones, self.mse_loss
+                )
+                self.ensemble_optimizer.zero_grad()
+                ensemble_loss.backward()
+                self.ensemble_optimizer.step()
+                ensemble_loss = ensemble_loss.detach().cpu().item()
+                loss_sum += ensemble_loss
+                avg_loss = loss_sum / (i + 1)
+                pbar.update(len(obs))
+                pbar.set_postfix({'ensemble_loss': ensemble_loss, 'avg_ensemble_loss_loss': avg_loss})
+                log_writer.add_scalar(f'ensemble_loss', ensemble_loss, i + start_num_batches)
+        return avg_loss, _start_num_batches
 
 
 if __name__ == '__main__':

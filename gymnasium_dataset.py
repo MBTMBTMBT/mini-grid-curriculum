@@ -17,7 +17,10 @@ class GymDataset(Dataset):
         """
         self.env = env  # Use the provided VecEnv
         self.data_size = data_size
-        self.num_envs = self.env.num_envs  # Retrieve the number of environments from the provided VecEnv
+        if self.env:
+            self.num_envs = self.env.num_envs  # Retrieve the number of environments from the provided VecEnv
+        else:
+            self.num_envs = 0
         self.data = []
         self.repeat = repeat  # Store the repeat factor
         self.movement_augmentation = movement_augmentation

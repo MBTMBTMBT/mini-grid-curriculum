@@ -906,6 +906,7 @@ class EnsembleTransitionModel(nn.Module):
         self.num_models = num_models
         self.models = nn.ModuleList([SimpleTransitionModel(latent_shape, action_dim, conv_arch) for _ in range(num_models)])
         self.epsilon = epsilon
+        self.num_actions = action_dim
 
     def compute_minibatch_loss(self, latent_state, action, next_latent_state, reward, done, loss_fn):
         """
@@ -924,6 +925,8 @@ class EnsembleTransitionModel(nn.Module):
         next_latent_state = next_latent_state.to(device)
         done = done.to(device)
 
+        action = F.one_hot(action, self.num_actions).type(torch.float)
+
         total_loss = torch.tensor(0.0).to(device)
         for model in self.models:
             # Forward pass
@@ -932,7 +935,7 @@ class EnsembleTransitionModel(nn.Module):
             # Compute losses: next state prediction loss, reward prediction loss, done prediction loss
             state_loss = loss_fn(z_next_pred, next_latent_state)
             reward_loss = loss_fn(reward_pred, reward)
-            done_loss = loss_fn(done_pred, done)
+            done_loss = F.binary_cross_entropy(done_pred.squeeze(), done.float())
 
             # Total loss
             total_loss += state_loss + reward_loss + done_loss
@@ -1059,7 +1062,7 @@ class WorldModelAgentDataset(GymDataset):
         # Collect data for the entire epoch with a progress bar showing the number of actual samples
         total_samples = self.data_size
         augmented = 0
-        next_obs, infos = env.reset()
+        next_obs = env.reset()
         with tqdm(total=total_samples, desc="Sampling Data", unit="sample") as pbar:
             while len(self.data) < total_samples:
                 # Sample actions for each parallel environment
@@ -1123,6 +1126,11 @@ class WorldModelAgent(WorldModel):
             ensemble_epsilon: float = 0.1,
             batch_size: int = 32,
     ):
+        if ensemble_net_arch is None:
+            ensemble_net_arch = [
+                (64, 3, 1, 1),
+                (64, 3, 1, 1),
+            ]
         super(WorldModelAgent, self).__init__(
             latent_shape,
             num_homomorphism_channels,
@@ -1135,7 +1143,7 @@ class WorldModelAgent(WorldModel):
         self.dataset = WorldModelAgentDataset(samples_per_epoch, dataset_repeat_times)
         self.dataloader = DataLoader(self.dataset, batch_size=batch_size, shuffle=True)
         self.ensemble_model = EnsembleTransitionModel(
-            latent_shape,
+            (num_homomorphism_channels, latent_shape[1], latent_shape[2]),
             num_actions,
             ensemble_net_arch,
             num_models=ensemble_num_models,
@@ -1204,14 +1212,17 @@ class WorldModelAgent(WorldModel):
             loss_sum = 0.0
             for i, batch in enumerate(dataloader):
                 obs, actions, next_obs, rewards, dones = batch
-                state = state.to(device)
-                action = action.to(device)
-                reward = reward.to(device)
-                next_state = next_state.to(device)
-                done = done.to(device)
+                state = obs.to(device)
+                actions = actions.to(device)
+                rewards = rewards.to(device)
+                next_state = next_obs.to(device)
+                dones = dones.to(device)
                 latent_state, next_latent_state = self.encoder(state), self.encoder(next_state)
+                # Make homomorphism state
+                homo_latent_state = latent_state[:, 0:self.num_homomorphism_channels, :, :]
+                next_homo_latent_state = next_latent_state[:, 0:self.num_homomorphism_channels, :, :]
                 ensemble_loss = self.ensemble_model.compute_minibatch_loss(
-                    latent_state, actions, rewards, next_latent_state, dones, self.mse_loss
+                    homo_latent_state, actions, next_homo_latent_state, rewards, dones, self.mse_loss
                 )
                 self.ensemble_optimizer.zero_grad()
                 ensemble_loss.backward()
@@ -1239,12 +1250,12 @@ class WorldModelAgent(WorldModel):
         except FileNotFoundError:
             pass
 
-        total_num_epochs = total_collected_samples // self.dataset_size
+        total_num_epochs = total_collected_samples // self.dataset.data_size
         for epoch in range(start_epoch, total_num_epochs):
             print(f"Start epoch {epoch + 1} / {total_num_epochs}:")
 
             print(
-                f"Resampling dataset samples: {self.sample_counter + 1}+{self.dataset.data_size} / {total_collected_samples}..."
+                f"Resampling dataset samples: {self.sample_counter}+{self.dataset.data_size} / {total_collected_samples}..."
             )
             # sample dataset
             self.dataset.resample(env, self._select_action_integers, temperature=1.0)
@@ -1367,10 +1378,12 @@ def train_world_model_agent():
     session_dir = r"./experiments/world_model_agent-door_key"
     dataset_samples = 4096
     dataset_repeat_each_epoch = 20
-    total_samples = 100
+    total_samples = 4096 * 100
+    ensemble_num_models = 8
     batch_size = 32
     lr = 1e-4
     num_parallel = 6
+    ensemble_epsilon = 0.2
 
     latent_shape = (8, 24, 24)  # channel, height, width
     num_homomorphism_channels = 5
@@ -1417,17 +1430,7 @@ def train_world_model_agent():
         for each_task_config in configs
     ])
 
-    dataset = GymDataset(venv, data_size=dataset_samples, repeat=dataset_repeat_each_epoch,
-                         movement_augmentation=movement_augmentation)
-    print(len(dataset))
-    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, drop_last=True)
-    print(len(dataloader))
-
-    log_dir = os.path.join(session_dir, "logs")
-    os.makedirs(log_dir, exist_ok=True)
-    log_writer = SummaryWriter(log_dir=log_dir)
-
-    world_model = WorldModel(
+    world_model = WorldModelAgent(
         latent_shape=latent_shape,
         num_homomorphism_channels=num_homomorphism_channels,
         obs_shape=venv.observation_space.shape,
@@ -1435,32 +1438,18 @@ def train_world_model_agent():
         cnn_net_arch=encoder_decoder_net_arch,
         transition_model_conv_arch=transition_model_conv_arch,
         lr=lr,
+        samples_per_epoch = dataset_samples,
+        dataset_repeat_times = dataset_repeat_each_epoch,
+        ensemble_num_models= ensemble_num_models,
+        ensemble_net_arch = transition_model_conv_arch,
+        ensemble_lr = lr,
+        ensemble_epsilon = ensemble_epsilon,
+        batch_size = batch_size,
     ).to(device)
 
-    min_loss = float('inf')
-    start_epoch = 0
-    try:
-        _, min_loss = world_model.load_model(save_dir=os.path.join(session_dir, 'models'), best=True)
-        start_epoch, _ = world_model.load_model(save_dir=os.path.join(session_dir, 'models'))
-        start_epoch += 1
-    except FileNotFoundError:
-        pass
+    world_model.train_session(venv, session_dir, total_samples)
 
-    for epoch in range(start_epoch, num_epochs):
-        print(f"Start epoch {epoch + 1} / {num_epochs}:")
-        print("Resampling dataset...")
-        dataset.resample()
-        print("Starting training...")
-        loss, _ = world_model.train_epoch(
-            dataloader,
-            log_writer,
-            start_num_batches=epoch * len(dataloader),
-        )
-        if loss < min_loss:
-            min_loss = loss
-            world_model.save_model(epoch, loss, is_best=True, save_dir=os.path.join(session_dir, 'models'))
-        world_model.save_model(epoch, loss, save_dir=os.path.join(session_dir, 'models'))
 
 
 if __name__ == '__main__':
-    pass
+    train_world_model_agent()

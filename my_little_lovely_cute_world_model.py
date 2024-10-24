@@ -1,6 +1,6 @@
 import io
 import os
-from typing import Tuple, List
+from typing import Tuple, List, Optional, Any
 
 import numpy as np
 import torch
@@ -9,8 +9,9 @@ import torch.optim as optim
 from PIL import Image
 import torch.nn.functional as F
 import torchvision.transforms as T
+from jedi.inference.gradual.typing import Callable
 from matplotlib import pyplot as plt
-from stable_baselines3.common.vec_env import SubprocVecEnv
+from stable_baselines3.common.vec_env import SubprocVecEnv, VecEnv
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
@@ -238,7 +239,7 @@ class TransitionModel(nn.Module):
         """
         Deterministic Transition Model based on CNN architecture.
         :param latent_shape: Shape of the latent space (channels, height, width)
-        :param action_dim: Dimensionality of the action space (one-hot encoded)
+        :param action_dim: Dimensionality of the action space (int)
         :param conv_arch: Convolutional network architecture for the encoder and decoder, e.g., [(64, 4, 2, 1), (128, 4, 2, 1)]
         """
         super(TransitionModel, self).__init__()
@@ -508,7 +509,7 @@ class SimpleTransitionModel(nn.Module):
         """
         A simplified transition model that replaces VAE with a deterministic CNN-based approach.
         :param latent_shape: Shape of the latent space (channels, height, width)
-        :param action_dim: Dimensionality of the action space (one-hot encoded)
+        :param action_dim: Dimensionality of the action space (int)
         :param conv_arch: Convolutional network architecture for the encoder, e.g., [(64, 4, 2, 1), (128, 4, 2, 1)]
         """
         super(SimpleTransitionModel, self).__init__()
@@ -896,7 +897,7 @@ class EnsembleTransitionModel(nn.Module):
         """
         Ensemble of SimpleTransitionModel to measure uncertainty for exploration.
         :param latent_shape: Shape of the latent space (channels, height, width)
-        :param action_dim: Dimensionality of the action space (one-hot encoded)
+        :param action_dim: Dimensionality of the action space (int)
         :param conv_arch: Convolutional architecture for the transition model
         :param num_models: Number of models in the ensemble
         :param epsilon: Epsilon for epsilon-greedy exploration (for random action selection)
@@ -938,16 +939,16 @@ class EnsembleTransitionModel(nn.Module):
 
         return total_loss / self.num_models
 
-    def compute_uncertainty(self, latent_state, action):
+    def compute_uncertainty(self, latent_states, actions):
         """
-        Compute uncertainty ranking for the given state-action pair.
-        :param latent_state: Current latent state (batch_size, latent_channels, latent_height, latent_width)
-        :param action: Action taken (batch_size, action_dim)
+        Compute uncertainty ranking for a batch of state-action pairs.
+        :param latent_states: Current latent states (batch_size, latent_channels, latent_height, latent_width)
+        :param actions: Actions taken (batch_size, action_dim)
         :return: Combined uncertainty for next latent state, reward, and done predictions (normalized).
         """
         device = next(self.models[0].parameters()).device
-        latent_state = latent_state.to(device)
-        action = action.to(device)
+        latent_states = latent_states.to(device)
+        actions = actions.to(device)
 
         state_predictions = []
         reward_predictions = []
@@ -956,7 +957,7 @@ class EnsembleTransitionModel(nn.Module):
         # Gather predictions from all models
         with torch.no_grad():
             for model in self.models:
-                z_next_pred, reward_pred, done_pred = model(latent_state, action)
+                z_next_pred, reward_pred, done_pred = model(latent_states, actions)
                 state_predictions.append(z_next_pred)
                 reward_predictions.append(reward_pred)
                 done_predictions.append(done_pred)
@@ -968,56 +969,136 @@ class EnsembleTransitionModel(nn.Module):
         done_predictions = torch.stack(done_predictions, dim=0)  # Shape: (num_models, batch_size, 1)
 
         # Compute variances for next state, reward, and done
-        state_uncertainty = state_predictions.var(
-            dim=0).mean().item()  # Average variance over all elements in the latent state
-        reward_uncertainty = reward_predictions.var(dim=0).mean().item()  # Variance of reward predictions
-        done_uncertainty = done_predictions.var(dim=0).mean().item()  # Variance of done predictions
+        state_uncertainty = state_predictions.var(dim=0).mean(
+            dim=[1, 2, 3])  # Batch variance over all latent state dimensions
+        reward_uncertainty = reward_predictions.var(dim=0).mean(dim=1)  # Batch variance for reward predictions
+        done_uncertainty = done_predictions.var(dim=0).mean(dim=1)  # Batch variance for done predictions
 
-        # Normalize the uncertainties (min-max normalization)
-        uncertainties = [state_uncertainty, reward_uncertainty, done_uncertainty]
-        min_val = min(uncertainties)
-        max_val = max(uncertainties)
-        if max_val - min_val == 0:
-            normalized_uncertainties = [1.0] * len(uncertainties)  # If all uncertainties are the same, set them to 1.0
-        else:
-            normalized_uncertainties = [(u - min_val) / (max_val - min_val) for u in uncertainties]
+        # Normalize the uncertainties (min-max normalization) for the batch
+        uncertainties = torch.stack([state_uncertainty, reward_uncertainty, done_uncertainty], dim=1)
+        min_val, _ = uncertainties.min(dim=1, keepdim=True)
+        max_val, _ = uncertainties.max(dim=1, keepdim=True)
+        normalized_uncertainties = (uncertainties - min_val) / (
+                    max_val - min_val + 1e-5)  # Add small value to avoid division by zero
 
         # Combine the normalized uncertainties
-        combined_uncertainty = sum(normalized_uncertainties)
+        combined_uncertainty = normalized_uncertainties.sum(dim=1)
 
         return combined_uncertainty
 
-    def select_action(self, latent_state, action_space, temperature=1.0):
+    def select_action(self, latent_states, action_space, temperature=1.0):
         """
-        Select an action based on uncertainty-driven exploration using softmax with mapped temperature.
-        :param latent_state: Current latent state (batch_size, latent_channels, latent_height, latent_width)
+        Select actions for a batch of latent states based on uncertainty-driven exploration using softmax with mapped temperature.
+        :param latent_states: Current latent states (batch_size, latent_channels, latent_height, latent_width)
         :param action_space: Available actions (list of one-hot encoded actions)
         :param temperature: The temperature value (0-inf) controlling randomness in action selection
-        :return: Selected action (one-hot encoded)
+        :return: Selected actions (one-hot encoded for each sample in the batch)
         """
-        # Epsilon-greedy: with probability epsilon, choose random action
-        if np.random.rand() < self.epsilon:
-            return np.random.choice(action_space)
+        batch_size = latent_states.size(0)
 
-        # Compute uncertainty for each action
+        # Epsilon-greedy: with probability epsilon, choose random actions for each sample
+        if np.random.rand() < self.epsilon:
+            random_indices = np.random.choice(len(action_space), batch_size)
+            return [action_space[idx] for idx in random_indices]
+
+        # Compute uncertainties for each action in the action space for all latent states
         uncertainties = []
         for action in action_space:
-            action_tensor = torch.FloatTensor(action).unsqueeze(0)
-            uncertainty = self.compute_uncertainty(latent_state, action_tensor)
+            action_tensor = torch.FloatTensor(action).unsqueeze(0).expand(batch_size,
+                                                                          -1)  # Broadcast action across the batch
+            uncertainty = self.compute_uncertainty(latent_states, action_tensor)
             uncertainties.append(uncertainty)
 
-        uncertainties = torch.tensor(uncertainties)
+        uncertainties = torch.stack(uncertainties, dim=1)  # Shape: (batch_size, num_actions)
 
         # Map temperature in the range [0, inf] for softmax scaling
         actual_temperature = temperature if temperature > 0 else 1e-5  # Ensure temperature is not zero
 
         # Apply temperature scaling for softmax
         scaled_uncertainties = uncertainties / actual_temperature
-        probabilities = torch.softmax(scaled_uncertainties, dim=0).numpy()
+        probabilities = torch.softmax(scaled_uncertainties, dim=1).cpu().numpy()  # Shape: (batch_size, num_actions)
 
-        # Select action based on the calculated softmax probabilities
-        selected_action_idx = np.random.choice(len(action_space), p=probabilities)
-        return action_space[selected_action_idx]
+        # Select actions based on the calculated softmax probabilities for each sample in the batch
+        selected_action_indices = [np.random.choice(len(action_space), p=prob) for prob in probabilities]
+
+        # Return the selected one-hot encoded actions
+        return [action_space[idx] for idx in selected_action_indices]
+
+def select_action_integers(self, latent_states, action_space, temperature=1.0):
+    """
+    Call select_action and return the actions as integer indices for a batch of latent states.
+    :param latent_states: Current latent states (batch_size, latent_channels, latent_height, latent_width)
+    :param action_space: Available actions (list of one-hot encoded actions)
+    :param temperature: The temperature value (0-inf) controlling randomness in action selection
+    :return: List of selected action indices (integer for each sample in the batch)
+    """
+    selected_actions = self.select_action(latent_states, action_space, temperature)
+
+    # Convert each selected one-hot action back to its corresponding integer index
+    selected_action_indices = [np.argmax(action) for action in selected_actions]
+
+    return selected_action_indices
+
+
+class WorldModelAgentDataset(GymDataset):
+    def __init__(self, data_size: int, repeat: int = 1, movement_augmentation: int = 0):
+        super().__init__(None, data_size, repeat)
+
+    def resample(self, env: VecEnv = None, action_selection_func: Optional[Callable[[np.ndarray, int, float], np.ndarray]] = None, temperature=1.0):
+        """Resample the data by interacting with the environment and collecting new data for one epoch."""
+        assert env is not None, "I hate to see warnings from the parent, but nah, you need to give an env to sample!"
+        num_envs = env.num_envs
+
+        self.data.clear()  # Clear existing data
+        obs = env.reset()  # Reset the environment to get the initial observations
+
+        # Collect data for the entire epoch with a progress bar showing the number of actual samples
+        total_samples = self.data_size
+        augmented = 0
+        next_obs, infos = env.reset()
+        with tqdm(total=total_samples, desc="Sampling Data", unit="sample") as pbar:
+            while len(self.data) < total_samples:
+                # Sample actions for each parallel environment
+                if action_selection_func is None:
+                    actions = np.array([env.action_space.sample() for _ in range(num_envs)])
+                else:
+                    actions = np.array(action_selection_func(next_obs, env.action_space.n, temperature))
+                next_obs, rewards, dones, infos = env.step(actions)
+
+                # Copy `next_obs` to avoid modifying the original
+                final_next_obs = np.copy(next_obs)
+
+                # If an environment is done, replace values in `final_next_obs`
+                done_indices = np.where(dones)[0]  # Optimisation: only handle environments where `dones` is True
+                for env_idx in done_indices:
+                    final_next_obs[env_idx] = infos[env_idx]["terminal_observation"]
+
+                # Store the data for each parallel environment
+                for env_idx in range(num_envs):
+                    if len(self.data) < total_samples:  # Ensure we don't overshoot the target samples
+                        if self.movement_augmentation > 0:
+                            repeat = 0 if np.allclose(
+                                obs[env_idx], final_next_obs[env_idx], rtol=1e-5, atol=1e-8,
+                            ) else self.movement_augmentation
+                        else:
+                            repeat = 0
+                        for _ in range(1 + repeat):
+                            self.data.append({
+                                'obs': torch.tensor(obs[env_idx], dtype=torch.float32),
+                                'action': torch.tensor(actions[env_idx], dtype=torch.int64),
+                                'next_obs': torch.tensor(final_next_obs[env_idx], dtype=torch.float32),
+                                'reward': torch.tensor(rewards[env_idx], dtype=torch.float32),
+                                'done': torch.tensor(dones[env_idx], dtype=torch.bool)
+                            })
+                        augmented += repeat
+
+                        # Update the progress bar with the number of samples collected in this step
+                        pbar.update(1 + repeat)
+
+                # Update the observation for the next step
+                obs = next_obs
+
+        print(f"{total_samples} samples collected, including {augmented} augmented.")
 
 
 class WorldModelAgent(WorldModel):
@@ -1045,7 +1126,11 @@ class WorldModelAgent(WorldModel):
             transition_model_conv_arch,
             lr,
         )
-        pass
+        self.dataset = WorldModelAgentDataset(dataset_size, dataset_repeat_times)
+        self.ensemble_num_models = ensemble_num_models
+        self.ensemble_net_arch = ensumble_net_arch
+        self.ensemble_lr = ensumble_lr
+        self.sample_counter = 0
 
 
 if __name__ == '__main__':

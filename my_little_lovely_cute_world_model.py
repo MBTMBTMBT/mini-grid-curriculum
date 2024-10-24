@@ -1048,7 +1048,7 @@ class WorldModelAgentDataset(GymDataset):
     def __init__(self, data_size: int, repeat: int = 1, movement_augmentation: int = 0):
         super().__init__(None, data_size, repeat, movement_augmentation)
 
-    def resample(self, env: VecEnv = None, action_selection_func: Optional[Callable[[np.ndarray, int, float], np.ndarray]] = None, temperature=1.0):
+    def resample(self, env: VecEnv = None, action_selection_func=None, temperature=1.0):
         """Resample the data by interacting with the environment and collecting new data for one epoch."""
         assert env is not None, "I hate to see warnings from the parent, but nah, you need to give an env to sample!"
         num_envs = env.num_envs
@@ -1115,12 +1115,13 @@ class WorldModelAgent(WorldModel):
             cnn_net_arch: List[Tuple[int, int, int, int]],
             transition_model_conv_arch: List[Tuple[int, int, int, int]],
             lr: float = 1e-4,
-            dataset_size: int = 4096,
+            samples_per_epoch: int = 4096,
             dataset_repeat_times: int = 10,
             ensemble_num_models: int = 4,
             ensemble_net_arch: List[Tuple[int, int, int, int]] = None,
             ensemble_lr: float = 1e-4,
-            ensemble_epsilon: float = 0.1
+            ensemble_epsilon: float = 0.1,
+            batch_size: int = 32,
     ):
         super(WorldModelAgent, self).__init__(
             latent_shape,
@@ -1131,7 +1132,8 @@ class WorldModelAgent(WorldModel):
             transition_model_conv_arch,
             lr,
         )
-        self.dataset = WorldModelAgentDataset(dataset_size, dataset_repeat_times)
+        self.dataset = WorldModelAgentDataset(samples_per_epoch, dataset_repeat_times)
+        self.dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
         self.ensemble_model = EnsembleTransitionModel(
             latent_shape,
             num_actions,
@@ -1143,7 +1145,44 @@ class WorldModelAgent(WorldModel):
         self.sample_counter = 0
         self.batch_counter = 0
 
-    def _select_action_integers(self, state, num_actions, temperature=1.0):
+    def save_model(self, epoch, loss, save_dir='models', is_best=False):
+        if not os.path.exists(save_dir):
+            os.makedirs(save_dir)
+
+        checkpoint = {
+            'epoch': epoch,
+            'model_state_dict': self.state_dict(),
+            'optimizer_state_dict': self.optimizer.state_dict(),
+            'loss': loss,
+            'trained_samples': self.sample_counter,
+            'ensemble_optimizer': self.ensemble_optimizer.state_dict(),
+        }
+
+        latest_path = os.path.join(save_dir, 'latest_checkpoint.pth')
+        torch.save(checkpoint, latest_path)
+        print(f"Saved latest model checkpoint at epoch {epoch} with loss {loss:.4f}")
+
+        if is_best:
+            best_path = os.path.join(save_dir, 'best_checkpoint.pth')
+            torch.save(checkpoint, best_path)
+            print(f"Saved best model checkpoint at epoch {epoch} with loss {loss:.4f}")
+
+    def load_model(self, save_dir='models', best=False):
+        checkpoint_path = os.path.join(save_dir, 'best_checkpoint.pth' if best else 'latest_checkpoint.pth')
+        if os.path.isfile(checkpoint_path):
+            checkpoint = torch.load(checkpoint_path)
+            self.load_state_dict(checkpoint['model_state_dict'])
+            self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            self.ensemble_optimizer = checkpoint['ensemble_optimizer']
+            self.trained_samples = checkpoint['trained_samples']
+            epoch = checkpoint['epoch']
+            loss = checkpoint['loss']
+            print(f"Loaded {'best' if best else 'latest'} model checkpoint from epoch {epoch} with loss {loss:.4f}")
+            return epoch, loss
+        else:
+            raise FileNotFoundError(f"No checkpoint found at {checkpoint_path}")
+
+    def _select_action_integers(self, state: np.ndarray, num_actions: int, temperature=1.0):
         state = torch.tensor(state)
         state = state.to(device)
         with torch.no_grad():
@@ -1154,7 +1193,7 @@ class WorldModelAgent(WorldModel):
         return self.ensemble_model.select_action_integers(homo_latent_state, num_actions, temperature)
 
     def train_epoch(self, dataloader: DataLoader, log_writer: SummaryWriter, start_num_batches=0,):
-        avg_loss, _start_num_batches = super(WorldModelAgent, self).train_epoch(
+        _avg_loss, _start_num_batches = super(WorldModelAgent, self).train_epoch(
             dataloader, log_writer, start_num_batches
         )
 
@@ -1180,7 +1219,35 @@ class WorldModelAgent(WorldModel):
                 pbar.update(len(obs))
                 pbar.set_postfix({'ensemble_loss': ensemble_loss, 'avg_ensemble_loss_loss': avg_loss})
                 log_writer.add_scalar(f'ensemble_loss', ensemble_loss, i + start_num_batches)
-        return avg_loss, _start_num_batches
+        return _avg_loss, _start_num_batches
+
+    def train_session(self, env: VecEnv, session_dir: str, total_collected_samples: int):
+        log_dir = os.path.join(session_dir, "logs")
+        os.makedirs(log_dir, exist_ok=True)
+        log_writer = SummaryWriter(log_dir=log_dir)
+
+        min_loss = float('inf')
+        start_epoch = 0
+
+        try:
+            _, min_loss = self.load_model(save_dir=os.path.join(session_dir, 'models'), best=True)
+            start_epoch, _ = self.load_model(save_dir=os.path.join(session_dir, 'models'))
+            start_epoch += 1
+        except FileNotFoundError:
+            pass
+
+        total_num_epochs = total_collected_samples // self.dataset_size
+        for epoch in range(start_epoch, total_num_epochs):
+            # sample dataset
+            self.dataset.resample(env, self._select_action_integers, temperature=1.0)
+
+            # train on epoch
+            loss, _ = self.train_epoch(self.dataloader, log_writer, start_num_batches=self.sample_counter)
+
+            if loss < min_loss:
+                min_loss = loss
+                self.save_model(epoch, loss, is_best=True, save_dir=os.path.join(session_dir, 'models'))
+            self.save_model(epoch, loss, save_dir=os.path.join(session_dir, 'models'))
 
 
 if __name__ == '__main__':

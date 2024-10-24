@@ -12,9 +12,9 @@ from matplotlib import pyplot as plt
 from stable_baselines3.common.vec_env import SubprocVecEnv
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
-from torchvision.models import *
-from piq import ssim
 from tqdm import tqdm
+from torchvision.models import vgg16
+from piq import ssim
 
 from customize_minigrid.wrappers import FullyObsImageWrapper
 from gymnasium_dataset import GymDataset
@@ -33,20 +33,23 @@ action_dict = {
 }
 
 
-# Enhanced loss with optional thresholding for MSE and MAE
+# Enhanced loss with separate handling for L1 and L2 (MSE) losses with optional thresholding
 class FlexibleThresholdedLoss(nn.Module):
-    def __init__(self, use_mse_threshold=True, use_mae_threshold=True, mse_threshold=None, mae_threshold=None,
-                 reduction='mean', l1_weight=1.0, l2_weight=1.0, threshold_weight=1.0, non_threshold_weight=1.0):
+    def __init__(self, use_mse_threshold=False, use_mae_threshold=True, mse_threshold=None, mae_threshold=None,
+                 reduction='mean', l1_weight=1.0, l2_weight=1.0, threshold_weight=1.0, non_threshold_weight=1.0,
+                 mse_clip_ratio=None, mae_clip_ratio=1e2):
         """
-        use_mse_threshold: Whether to apply a threshold to MSE-based loss.
-        use_mae_threshold: Whether to apply a threshold to MAE-based loss.
-        mse_threshold: Static MSE-based threshold if provided; otherwise, will use adaptive MSE threshold.
-        mae_threshold: Static MAE-based threshold if provided; otherwise, will use adaptive MAE threshold.
+        use_mse_threshold: Whether to apply a threshold to L2 (MSE)-based loss.
+        use_mae_threshold: Whether to apply a threshold to L1-based loss.
+        mse_threshold: Static L2 (MSE)-based threshold if provided; otherwise, will use adaptive MSE threshold.
+        mae_threshold: Static L1-based threshold if provided; otherwise, will use adaptive MAE threshold.
         reduction: Specifies the reduction to apply to the output. ('mean' or 'sum').
         l1_weight: The weight for L1 loss in both thresholded and non-thresholded parts.
-        l2_weight: The weight for L2 loss in both thresholded and non-thresholded parts.
+        l2_weight: The weight for L2 (MSE) loss in both thresholded and non-thresholded parts.
         threshold_weight: Weight for the thresholded loss part.
         non_threshold_weight: Weight for the non-thresholded loss part.
+        mse_clip_ratio: Ratio to apply the upper limit clipping for MSE thresholded loss.
+        mae_clip_ratio: Ratio to apply the upper limit clipping for MAE thresholded loss.
         """
         super(FlexibleThresholdedLoss, self).__init__()
         self.use_mse_threshold = use_mse_threshold
@@ -58,100 +61,83 @@ class FlexibleThresholdedLoss(nn.Module):
         self.l2_weight = l2_weight
         self.threshold_weight = threshold_weight
         self.non_threshold_weight = non_threshold_weight
+        self.mse_clip_ratio = mse_clip_ratio
+        self.mae_clip_ratio = mae_clip_ratio
 
     def forward(self, input_img, target_img):
-        # Calculate pixel-wise absolute difference
-        pixel_diff = torch.abs(input_img - target_img)
+        # Calculate pixel-wise absolute difference (for L1) and squared difference (for L2/MSE)
+        pixel_diff = torch.abs(input_img - target_img)  # For L1
+        pixel_diff_squared = (input_img - target_img) ** 2  # For L2 (MSE)
 
-        # Part 1: MSE-based threshold
-        mse_loss = torch.mean((input_img - target_img) ** 2)  # MSE loss
+        # General mean for normalization
+        general_mean = pixel_diff.mean()
+
+        # Part 1: L2 (MSE)-based threshold handling with optional normalization
+        mse_loss = pixel_diff_squared.mean()  # MSE (L2) loss
         if self.use_mse_threshold:
             if self.mse_threshold is None:
                 self.mse_threshold = mse_loss  # Set adaptive threshold based on MSE
-            mse_thresholded_diff = torch.where(pixel_diff < self.mse_threshold, torch.tensor(0.0, device=pixel_diff.device), pixel_diff)
-            mse_thresholded_l1_loss = mse_thresholded_diff  # L1 part for MSE-thresholded differences
-            mse_thresholded_l2_loss = mse_thresholded_diff ** 2  # L2 part for MSE-thresholded differences
-        else:
-            # No thresholding, consider all differences for MSE
-            mse_thresholded_l1_loss = pixel_diff
-            mse_thresholded_l2_loss = pixel_diff ** 2
 
-        # Part 2: MAE-based threshold
-        mae_loss = torch.mean(pixel_diff)  # MAE loss
+            # Filter values based on threshold
+            mse_thresholded_diff = pixel_diff_squared[pixel_diff_squared >= self.mse_threshold]
+
+            # Calculate the thresholded loss and normalize if necessary
+            if mse_thresholded_diff.numel() > 0:
+                mse_thresholded_loss = mse_thresholded_diff.mean()
+                if self.mse_clip_ratio is not None:
+                    clip_value = self.mse_clip_ratio * general_mean
+                    # Normalize the loss if it exceeds the clip_value
+                    if mse_thresholded_loss > clip_value:
+                        mse_thresholded_loss = clip_value * mse_thresholded_loss / mse_thresholded_loss.detach()
+            else:
+                mse_thresholded_loss = torch.tensor(0.0, device=pixel_diff.device)
+        else:
+            # No thresholding, use all squared differences for L2 (MSE)
+            mse_thresholded_loss = pixel_diff_squared.mean()
+
+        # Part 2: L1-based threshold handling with optional normalization
+        mae_loss = pixel_diff.mean()  # L1 (absolute difference) loss
         if self.use_mae_threshold:
             if self.mae_threshold is None:
                 self.mae_threshold = mae_loss  # Set adaptive threshold based on MAE
-            mae_thresholded_diff = torch.where(pixel_diff < self.mae_threshold, torch.tensor(0.0, device=pixel_diff.device), pixel_diff)
-            mae_thresholded_l1_loss = mae_thresholded_diff  # L1 part for MAE-thresholded differences
-            mae_thresholded_l2_loss = mae_thresholded_diff ** 2  # L2 part for MAE-thresholded differences
+
+            # Filter values based on threshold
+            mae_thresholded_diff = pixel_diff[pixel_diff >= self.mae_threshold]
+
+            # Calculate the thresholded loss and normalize if necessary
+            if mae_thresholded_diff.numel() > 0:
+                mae_thresholded_loss = mae_thresholded_diff.mean()
+                if self.mae_clip_ratio is not None:
+                    clip_value = self.mae_clip_ratio * general_mean
+                    # Normalize the loss if it exceeds the clip_value
+                    if mae_thresholded_loss > clip_value:
+                        mae_thresholded_loss = clip_value * mae_thresholded_loss / mae_thresholded_loss.detach()
+            else:
+                mae_thresholded_loss = torch.tensor(0.0, device=pixel_diff.device)
         else:
-            # No thresholding, consider all differences for MAE
-            mae_thresholded_l1_loss = pixel_diff
-            mae_thresholded_l2_loss = pixel_diff ** 2
+            # No thresholding, use all absolute differences for L1
+            mae_thresholded_loss = pixel_diff.mean()
 
-        # Part 3: Non-thresholded loss (all differences are considered for both MSE and MAE)
-        non_thresholded_l1_loss = pixel_diff  # L1 part without threshold
-        non_thresholded_l2_loss = pixel_diff ** 2  # L2 part without threshold
+        # Part 3: Non-thresholded loss (all differences are considered for both L1 and L2)
+        non_thresholded_l1_loss = pixel_diff.mean()  # L1 part without threshold
+        non_thresholded_l2_loss = pixel_diff_squared.mean()  # L2 (MSE) part without threshold
 
-        # Combine L1 and L2 losses for thresholded parts
-        mse_thresholded_loss = self.l1_weight * mse_thresholded_l1_loss + self.l2_weight * mse_thresholded_l2_loss
-        mae_thresholded_loss = self.l1_weight * mae_thresholded_l1_loss + self.l2_weight * mae_thresholded_l2_loss
+        # Combine thresholded L1 and L2 losses
+        combined_thresholded_loss = self.l1_weight * mae_thresholded_loss + self.l2_weight * mse_thresholded_loss
 
-        # Combine L1 and L2 losses for non-thresholded part
-        non_thresholded_loss = self.l1_weight * non_thresholded_l1_loss + self.l2_weight * non_thresholded_l2_loss
+        # Combine non-thresholded L1 and L2 losses
+        combined_non_thresholded_loss = self.l1_weight * non_thresholded_l1_loss + self.l2_weight * non_thresholded_l2_loss
 
         # Apply reduction (mean or sum) to each part
         if self.reduction == 'mean':
-            mse_thresholded_loss = mse_thresholded_loss.mean()
-            mae_thresholded_loss = mae_thresholded_loss.mean()
-            non_thresholded_loss = non_thresholded_loss.mean()
+            combined_thresholded_loss = combined_thresholded_loss.mean()
+            combined_non_thresholded_loss = combined_non_thresholded_loss.mean()
         elif self.reduction == 'sum':
-            mse_thresholded_loss = mse_thresholded_loss.sum()
-            mae_thresholded_loss = mae_thresholded_loss.sum()
-            non_thresholded_loss = non_thresholded_loss.sum()
+            combined_thresholded_loss = combined_thresholded_loss.sum()
+            combined_non_thresholded_loss = combined_non_thresholded_loss.sum()
 
         # Combine thresholded and non-thresholded losses with respective weights
-        total_loss = self.threshold_weight * (mse_thresholded_loss + mae_thresholded_loss) + self.non_threshold_weight * non_thresholded_loss
-
-        return total_loss
-
-
-
-# Define a unified loss function class that combines Perceptual, SSIM, and MAE/MSE losses
-class UnifiedLoss(nn.Module):
-    def __init__(self, perc_weight=0.3333, ssim_weight=0.3333, pixel_loss_weight=0.3333):
-        super(UnifiedLoss, self).__init__()
-        # Load pre-trained layers for perceptual loss
-        self.perc_layers = vgg19(pretrained=True).features[:8]
-        # self.perc_layers = torch.nn.Sequential(*list(resnet152(pretrained=True).children())[:8])
-        for param in self.perc_layers.parameters():
-            param.requires_grad = False  # Freeze VGG parameters
-
-        # Weights for each loss component
-        self.perc_weight = perc_weight
-        self.ssim_weight = ssim_weight
-        self.pixel_loss_weight = pixel_loss_weight
-
-    def forward(self, gen_img, target_img):
-        # Perceptual Loss: Extract features and compute L1 loss between them
-        gen_features = self.perc_layers(gen_img)
-        target_features = self.perc_layers(target_img)
-        perceptual_loss = (
-                nn.functional.l1_loss(gen_features, target_features)
-                # + nn.functional.mse_loss(gen_features, target_features)
-        )
-
-        # SSIM Loss: 1 - SSIM(generated, target) as loss
-        ssim_loss = 1 - ssim(gen_img, target_img, data_range=1.0)
-
-        # Pixel-wise loss
-        pixel_loss = (nn.functional.mse_loss(gen_img, target_img)
-                      + nn.functional.l1_loss(gen_img, target_img))
-
-        # Combine all losses with respective weights
-        total_loss = (self.perc_weight * perceptual_loss +
-                      self.ssim_weight * ssim_loss +
-                      self.pixel_loss_weight * pixel_loss)
+        total_loss = self.threshold_weight * combined_thresholded_loss + self.non_threshold_weight * combined_non_thresholded_loss
 
         return total_loss
 
@@ -246,9 +232,15 @@ class Decoder(nn.Module):
         return self.decoder(latent_state)
 
 
-class TransitionModelVAE(nn.Module):
+class TransitionModel(nn.Module):
     def __init__(self, latent_shape, action_dim, conv_arch):
-        super(TransitionModelVAE, self).__init__()
+        """
+        Deterministic Transition Model based on CNN architecture.
+        :param latent_shape: Shape of the latent space (channels, height, width)
+        :param action_dim: Dimensionality of the action space (one-hot encoded)
+        :param conv_arch: Convolutional network architecture for the encoder and decoder, e.g., [(64, 4, 2, 1), (128, 4, 2, 1)]
+        """
+        super(TransitionModel, self).__init__()
         latent_channels, latent_height, latent_width = latent_shape
 
         self.action_dim = action_dim
@@ -274,12 +266,6 @@ class TransitionModelVAE(nn.Module):
 
         # Dynamically calculate the output shape after conv layers
         self.output_shape = self._get_output_shape(latent_shape)
-
-        # Single convolution layer to generate both mean and logvar
-        self.conv_mean_logvar = nn.Conv2d(self.output_shape[0], self.output_shape[0] * 2, kernel_size=3, padding=1)
-
-        # Adaptive pooling if needed
-        self.adaptive_pool = nn.AdaptiveAvgPool2d((1, 1))
 
         # Deconvolutional layers
         deconv_layers = []
@@ -342,7 +328,156 @@ class TransitionModelVAE(nn.Module):
         x = self.initial_conv(x)
         x = self.conv_encoder(x)
 
+        # Process through decoder
+        z_next_decoded = self.deconv_decoder(x)
+        z_next_decoded = F.sigmoid(z_next_decoded)  # Sigmoid activation for output scaling
+
+        # Reward and done prediction
+        x = self.reward_done_conv(x)
+        reward_pred = self.reward_predictor(x)
+        done_pred = self.done_predictor(x)
+
+        return z_next_decoded, reward_pred, done_pred
+
+
+class TransitionModelVAE(TransitionModel):
+    def __init__(self, latent_shape, action_dim, conv_arch):
+        """
+        VAE-based Transition Model, inheriting from the deterministic Transition Model.
+        """
+        super(TransitionModelVAE, self).__init__(latent_shape, action_dim, conv_arch)
+
+        # Overwrite the conv_mean_logvar layer to generate both mean and logvar
+        self.conv_mean_logvar = nn.Conv2d(self.output_shape[0], self.output_shape[0] * 2, kernel_size=3, padding=1)
+
+    def forward(self, latent_state, action):
+        batch_size, latent_channels, latent_height, latent_width = latent_state.shape
+
+        # Reshape action to match latent state dimensions
+        action_reshaped = action.view(batch_size, self.action_dim, 1, 1).expand(batch_size, self.action_dim, latent_height, latent_width)
+        x = torch.cat([latent_state, action_reshaped], dim=1)
+
+        # Process through encoder
+        x = self.initial_conv(x)
+        x = self.conv_encoder(x)
+
         # Generate mean and logvar
+        mean_logvar = self.conv_mean_logvar(x)
+        mean, logvar = torch.split(mean_logvar, self.output_shape[0], dim=1)
+
+        # Reparameterization trick (mean + eps * std)
+        std = torch.exp(0.5 * logvar)
+        eps = torch.randn_like(std)
+        z_next = mean + eps * std
+
+        # Process through decoder
+        z_next_decoded = self.deconv_decoder(z_next)
+        z_next_decoded = F.sigmoid(z_next_decoded)  # Sigmoid activation for output scaling
+
+        # Reward and done prediction
+        x = self.reward_done_conv(x)
+        reward_pred = self.reward_predictor(x)
+        done_pred = self.done_predictor(x)
+
+        return z_next_decoded, mean, logvar, reward_pred, done_pred
+
+
+class VectorQuantizer(nn.Module):
+    def __init__(self, num_embeddings, embedding_dim, commitment_cost=0.25):
+        """
+        Vector Quantizer for VQ-VAE
+        :param num_embeddings: Number of vectors in the codebook
+        :param embedding_dim: Dimensionality of the embeddings
+        :param commitment_cost: Weight for the commitment loss
+        """
+        super(VectorQuantizer, self).__init__()
+        self.num_embeddings = num_embeddings
+        self.embedding_dim = embedding_dim
+        self.commitment_cost = commitment_cost
+
+        # Embedding table
+        self.embedding = nn.Parameter(torch.randn(num_embeddings, embedding_dim))
+
+    def forward(self, inputs):
+        # Flatten inputs except the last dimension
+        flat_inputs = inputs.view(-1, self.embedding_dim)
+
+        # Compute L2 distances between input vectors and embeddings
+        distances = torch.sum(flat_inputs ** 2, dim=1, keepdim=True) + \
+                    torch.sum(self.embedding ** 2, dim=1) - \
+                    2 * torch.matmul(flat_inputs, self.embedding.t())
+
+        # Get the closest embedding index
+        encoding_indices = torch.argmin(distances, dim=1).unsqueeze(1)
+
+        # Quantize by replacing with closest embedding
+        quantized = F.embedding(encoding_indices, self.embedding).view_as(inputs)
+
+        # Compute losses
+        embedding_loss = F.mse_loss(quantized.detach(), inputs)
+        commitment_loss = self.commitment_cost * F.mse_loss(inputs.detach(), quantized)
+        quantized = inputs + (quantized - inputs).detach()
+
+        return quantized, encoding_indices, embedding_loss + commitment_loss
+
+
+class TransitionModelVQVAE(TransitionModel):
+    def __init__(self, latent_shape, action_dim, conv_arch, num_embeddings=512):
+        super(TransitionModelVQVAE, self).__init__(latent_shape, action_dim, conv_arch)
+        embedding_dim = latent_shape[0]  # embedding_dim based on the output channels of decoder
+
+        # Vector quantizer
+        self.vector_quantizer = VectorQuantizer(num_embeddings, embedding_dim)
+
+    def forward(self, latent_state, action):
+        batch_size, latent_channels, latent_height, latent_width = latent_state.shape
+
+        # Reshape action to match latent state dimensions
+        action_reshaped = action.view(batch_size, self.action_dim, 1, 1).expand(batch_size, self.action_dim,
+                                                                                latent_height, latent_width)
+        x = torch.cat([latent_state, action_reshaped], dim=1)
+
+        # Process through encoder
+        x = self.initial_conv(x)
+        x = self.conv_encoder(x)
+
+        # Process through decoder
+        z_next_decoded = self.deconv_decoder(x)
+
+        # Apply vector quantization on the output of decoder
+        z_quantized, _, vq_loss = self.vector_quantizer(z_next_decoded)
+
+        # Apply Sigmoid to limit the output range between [0, 1]
+        z_quantized = torch.sigmoid(z_quantized)
+
+        # Reward and done predictions
+        reward_pred = self.reward_predictor(x)
+        done_pred = self.done_predictor(x)
+
+        return z_quantized, reward_pred, done_pred, vq_loss
+
+
+class TransitionModelVQVAEVAE(TransitionModelVAE):
+    def __init__(self, latent_shape, action_dim, conv_arch, num_embeddings=512):
+        super(TransitionModelVQVAEVAE, self).__init__(latent_shape, action_dim, conv_arch)
+        embedding_dim = latent_shape[0]  # embedding_dim based on the output channels of decoder
+
+        # Vector quantizer
+        self.vector_quantizer = VectorQuantizer(num_embeddings, embedding_dim)
+
+    def forward(self, latent_state, action):
+        batch_size, latent_channels, latent_height, latent_width = latent_state.shape
+
+        # Reshape action to match latent state dimensions
+        action_reshaped = action.view(batch_size, self.action_dim, 1, 1).expand(batch_size, self.action_dim,
+                                                                                latent_height, latent_width)
+        x = torch.cat([latent_state, action_reshaped], dim=1)
+
+        # Process through encoder
+        x = self.initial_conv(x)
+        x = self.conv_encoder(x)
+
+        # Generate mean and logvar for VAE
         mean_logvar = self.conv_mean_logvar(x)
         mean, logvar = torch.split(mean_logvar, self.output_shape[0], dim=1)
 
@@ -353,14 +488,18 @@ class TransitionModelVAE(nn.Module):
 
         # Process through decoder
         z_next_decoded = self.deconv_decoder(z_next)
-        z_next_decoded = F.sigmoid(z_next_decoded)
 
-        # Reward and done prediction
-        x = self.reward_done_conv(x)
+        # Apply vector quantization on the output of decoder
+        z_quantized, _, vq_loss = self.vector_quantizer(z_next_decoded)
+
+        # Apply Sigmoid to limit the output range between [0, 1]
+        z_quantized = torch.sigmoid(z_quantized)
+
+        # Reward and done predictions
         reward_pred = self.reward_predictor(x)
         done_pred = self.done_predictor(x)
 
-        return z_next_decoded, mean, logvar, reward_pred, done_pred
+        return z_quantized, mean, logvar, reward_pred, done_pred, vq_loss
 
 
 class SimpleTransitionModel(nn.Module):
@@ -451,6 +590,7 @@ class SimpleTransitionModel(nn.Module):
         # Process through decoder
         z_next_decoded = self.deconv_decoder(x)
         z_next_decoded = self.final_conv(z_next_decoded)  # Final conv to match latent shape
+        z_next_decoded = F.sigmoid(z_next_decoded)
 
         # Reward and Done prediction
         x = self.reward_done_conv(x)
@@ -464,41 +604,36 @@ class WorldModel(nn.Module):
     def __init__(
             self,
             latent_shape: Tuple[int, int, int],
-            # num_homomorphism_channels: int,
+            num_homomorphism_channels: int,
             obs_shape: Tuple[int, int, int],
             num_actions: int,
             cnn_net_arch: List[Tuple[int, int, int, int]],
             transition_model_conv_arch: List[Tuple[int, int, int, int]],
-            ae_lr: float = 1e-4,
-            trvae_lr: float = 1e-4,
+            lr: float = 1e-4,
     ):
         super(WorldModel, self).__init__()
         self.latent_shape = latent_shape
-        # self.num_homomorphism_channels = num_homomorphism_channels
-        # self.homomorphism_latent_space = (num_homomorphism_channels, latent_shape[1], latent_shape[2])
+        self.num_homomorphism_channels = num_homomorphism_channels
+        self.homomorphism_latent_space = (num_homomorphism_channels, latent_shape[1], latent_shape[2])
         self.encoder = Encoder(obs_shape, latent_shape, cnn_net_arch)
         self.decoder = Decoder(latent_shape, obs_shape, cnn_net_arch)
-        self.transition_model = SimpleTransitionModel(latent_shape, num_actions, transition_model_conv_arch)
+        self.transition_model = TransitionModel(self.homomorphism_latent_space, num_actions, transition_model_conv_arch)
+        # self.transition_model = SimpleTransitionModel(self.homomorphism_latent_space, num_actions, transition_model_conv_arch)
 
         self.num_actions = num_actions
 
-        # Optimizer for all components except the discriminator
-        self.ae_optimizer = optim.Adam(
+        # Optimizer for all components
+        self.optimizer = optim.Adam(
             list(self.encoder.parameters()) +
-            list(self.decoder.parameters()),
-            lr=ae_lr,
-        )
-
-        # Separate optimizer for the discriminator
-        self.trvae_optimizer = optim.Adam(
+            list(self.decoder.parameters()) +
             list(self.transition_model.parameters()),
-            lr=trvae_lr
+            lr=lr,
         )
 
         # Loss functions
         self.mse_loss = nn.MSELoss()
         self.mae_loss = nn.L1Loss()
-        self.uni_loss = FlexibleThresholdedLoss()
+        self.mbt_loss = FlexibleThresholdedLoss()
 
     def forward(self, state, action):
         device = next(self.parameters()).device
@@ -509,138 +644,67 @@ class WorldModel(nn.Module):
         latent_state = self.encoder(state)
 
         # Make homomorphism state
-        # homo_latent_state = latent_state[:, 0:self.num_homomorphism_channels, :, :]
+        homo_latent_state = latent_state[:, 0:self.num_homomorphism_channels, :, :]
 
         # Predict the next latent state and reward with the transition model
         action = F.one_hot(action, self.num_actions).type(torch.float)
         # predicted_next_homo_latent_state, mean, logvar, predicted_reward, predicted_done \
         #     = self.transition_model(homo_latent_state, action)
-        # predicted_next_latent_state, mean, logvar, predicted_reward, predicted_done\
-        #     = self.transition_model(latent_state, action)
-        predicted_next_latent_state, predicted_reward, predicted_done \
-            = self.transition_model(latent_state, action)
+        predicted_next_homo_latent_state, predicted_reward, predicted_done \
+            = self.transition_model(homo_latent_state, action)
 
         # Make homomorphism next state
-        # predicted_next_state = torch.cat(
-        #     [predicted_next_homo_latent_state, latent_state[:, self.num_homomorphism_channels:, :, :]], dim=1)
+        predicted_next_state = torch.cat(
+            [predicted_next_homo_latent_state, latent_state[:, self.num_homomorphism_channels:, :, :]], dim=1)
 
         # Reconstruct the predicted next state
         predicted_reconstructed_state = self.decoder(latent_state)
-        predicted_reconstructed_next_state = self.decoder(predicted_next_latent_state)
+        predicted_reconstructed_next_state = self.decoder(predicted_next_state)
 
         # **Resize the next state** to match the size of the reconstructed state
-        resized_predicted_next_state = F.interpolate(predicted_reconstructed_next_state, size=state.shape[2:], mode='bilinear',
-                                           align_corners=False)
-        resized_next_state = F.interpolate(predicted_reconstructed_state, size=state.shape[2:],
+        resized_predicted_next_state = F.interpolate(predicted_reconstructed_next_state, size=state.shape[2:],
                                                      mode='bilinear',
                                                      align_corners=False)
+        resized_next_state = F.interpolate(predicted_reconstructed_state, size=state.shape[2:],
+                                           mode='bilinear',
+                                           align_corners=False)
 
         return resized_next_state, resized_predicted_next_state, predicted_reward, predicted_done
 
-    def save_model(self, epoch, gen_loss, trans_loss, save_dir='models', is_best=False):
+    def save_model(self, epoch, loss, save_dir='models', is_best=False):
         if not os.path.exists(save_dir):
             os.makedirs(save_dir)
 
         checkpoint = {
             'epoch': epoch,
             'model_state_dict': self.state_dict(),
-            'ae_optimizer_state_dict': self.ae_optimizer.state_dict(),
-            'trvae_optimizer_state_dict': self.trvae_optimizer.state_dict(),
-            'gen_loss': gen_loss,
-            'trans_loss': trans_loss,
+            'optimizer_state_dict': self.optimizer.state_dict(),
+            'loss': loss,
         }
 
         latest_path = os.path.join(save_dir, 'latest_checkpoint.pth')
         torch.save(checkpoint, latest_path)
-        print(f"Saved latest model checkpoint at epoch {epoch} with loss {gen_loss:.4f}, {trans_loss:.4f}")
+        print(f"Saved latest model checkpoint at epoch {epoch} with loss {loss:.4f}")
 
         if is_best:
             best_path = os.path.join(save_dir, 'best_checkpoint.pth')
             torch.save(checkpoint, best_path)
-            print(f"Saved best model checkpoint at epoch {epoch} with loss {gen_loss:.4f}, {trans_loss:.4f}")
+            print(f"Saved best model checkpoint at epoch {epoch} with loss {loss:.4f}")
 
     def load_model(self, save_dir='models', best=False):
         checkpoint_path = os.path.join(save_dir, 'best_checkpoint.pth' if best else 'latest_checkpoint.pth')
         if os.path.isfile(checkpoint_path):
             checkpoint = torch.load(checkpoint_path)
             self.load_state_dict(checkpoint['model_state_dict'])
-            self.ae_optimizer.load_state_dict(checkpoint['ae_optimizer_state_dict'])
-            self.trvae_optimizer.load_state_dict(checkpoint['trvae_optimizer_state_dict'])
+            self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
             epoch = checkpoint['epoch']
-            gen_loss = checkpoint['gen_loss']
-            trans_loss = checkpoint['trans_loss']
-            print(f"Loaded {'best' if best else 'latest'} model checkpoint from epoch {epoch} with loss {gen_loss:.4f}, {trans_loss:.4f}")
-            return epoch, gen_loss, trans_loss
+            loss = checkpoint['loss']
+            print(f"Loaded {'best' if best else 'latest'} model checkpoint from epoch {epoch} with loss {loss:.4f}")
+            return epoch, loss
         else:
             raise FileNotFoundError(f"No checkpoint found at {checkpoint_path}")
 
-    def train_autoencoder_minibatch(self, state, next_state):
-        device = next(self.parameters()).device
-        state = state.to(device)
-        next_state = next_state.to(device)
-
-        # Encode the current and next state
-        latent_state = self.encoder(state)
-        latent_next_state = self.encoder(next_state)
-
-        # # make the 'predicted' next latent state by merging the two latent states
-        # predicted_latent_next_state = torch.cat(
-        #     [latent_next_state[:, 0:self.num_homomorphism_channels, :, :],
-        #      latent_state[:, self.num_homomorphism_channels:, :, :]],
-        #     dim=1,
-        # )
-        #
-        # # make fake reconstructed current state by merging random noised channels
-        # fake_latent_state = torch.cat(
-        #     [torch.randn_like(latent_next_state[:, 0:self.num_homomorphism_channels, :, :]),
-        #      latent_state[:, self.num_homomorphism_channels:, :, :]],
-        #     dim=1,
-        # )
-
-        # get reconstructed states
-        reconstructed_state = self.decoder(latent_state)
-        reconstructed_next_state = self.decoder(latent_next_state)
-        # reconstructed_predicted_next_state = self.decoder(predicted_latent_next_state)
-        # reconstructed_fake_state = self.decoder(fake_latent_state)
-        #
-        # get expected 'reconstructed' states
-        resized_state = F.interpolate(state, size=reconstructed_state.shape[2:],
-                                           mode='bilinear', align_corners=False)
-        resized_next_state = F.interpolate(next_state, size=reconstructed_state.shape[2:],
-                                           mode='bilinear', align_corners=False)
-
-        reconstruction_loss = (
-                # self.mse_loss(reconstructed_state, resized_state) +
-                # self.mae_loss(reconstructed_state, resized_state) +
-                # self.mse_loss(reconstructed_next_state, resized_next_state) +
-                # self.mae_loss(reconstructed_next_state, resized_next_state) +
-                # self.mse_loss(reconstructed_state, resized_state) +
-                # self.mae_loss(reconstructed_state, resized_state) +
-                # self.mse_loss(reconstructed_next_state, resized_next_state) +
-                # self.mae_loss(reconstructed_next_state, resized_next_state)
-                self.uni_loss(reconstructed_state, resized_state) +
-                self.uni_loss(reconstructed_next_state, resized_next_state)
-        )
-
-        # get hidden observation channels and the loss
-        # observation_channel_loss = self.mse_loss(
-        #     latent_state[:, self.num_homomorphism_channels:, :, :],  # .detach(),
-        #     latent_next_state[:, self.num_homomorphism_channels:, :, :],
-        # )
-
-        ae_loss = reconstruction_loss # + observation_channel_loss
-
-        self.ae_optimizer.zero_grad()
-        ae_loss.backward()
-        self.ae_optimizer.step()
-
-        return {
-            # "reconstruction_loss": reconstruction_loss.detach().cpu().item(),
-            # "observation_channel_loss": observation_channel_loss.detach().cpu().item(),
-            "ae_loss": ae_loss.detach().cpu().item(),
-        }
-
-    def train_transition_model_minibatch(self, state, action, reward, next_state, done):
+    def train_minibatch(self, state, action, reward, next_state, done):
         device = next(self.parameters()).device
         state = state.to(device)
         action = action.to(device)
@@ -649,178 +713,179 @@ class WorldModel(nn.Module):
         done = done.to(device)
 
         # Encode the current and next state
-        with torch.no_grad():
-            latent_state = self.encoder(state)
-            latent_next_state = self.encoder(next_state)
+        latent_state = self.encoder(state)
+        latent_next_state = self.encoder(next_state).detach()
 
         # Make homomorphism states
-        # homo_latent_state = latent_state[:, 0:self.num_homomorphism_channels, :, :]
-        # homo_latent_next_state = latent_next_state[:, 0:self.num_homomorphism_channels, :, :]
+        homo_latent_state = latent_state[:, 0:self.num_homomorphism_channels, :, :]
+        homo_latent_next_state = latent_next_state[:, 0:self.num_homomorphism_channels, :, :]
 
         # Predict the next latent state and reward with the transition model
         action = F.one_hot(action, self.num_actions).type(torch.float)
         # predicted_next_homo_latent_state, mean, logvar, predicted_reward, predicted_done \
         #     = self.transition_model(homo_latent_state, action)
-        # predicted_latent_next_state, mean, logvar, predicted_reward, predicted_done \
-        #     = self.transition_model(latent_state, action)
-        predicted_latent_next_state, predicted_reward, predicted_done \
-            = self.transition_model(latent_state, action)
+        predicted_next_homo_latent_state, predicted_reward, predicted_done \
+            = self.transition_model(homo_latent_state, action)
 
-        latent_transition_loss = self.mse_loss(latent_next_state, predicted_latent_next_state)
-        # kl_loss = -0.5 * torch.sum(1 + logvar - mean.pow(2) - logvar.exp())
+        # Make homomorphism next state
+        predicted_latent_next_state = torch.cat(
+            [predicted_next_homo_latent_state,
+             latent_state[:, self.num_homomorphism_channels:, :, :]],
+            dim=1,
+        )
+        latent_next_state = torch.cat(
+            [homo_latent_next_state,
+             latent_state[:, self.num_homomorphism_channels:, :, :]],
+            dim=1,
+        )  # still use the obs layers from the first observation
 
-        vae_loss = latent_transition_loss  # + 0.1 * kl_loss
-        reward_loss = self.mse_loss(predicted_reward.squeeze(), reward)
+        # Reconstruct the state and predicted next state
+        # reconstructed_state = self.decoder(latent_state)
+        reconstructed_next_state = self.decoder(latent_next_state)
+        reconstructed_predicted_next_state = self.decoder(predicted_latent_next_state)
+
+        # **Resize the states** to match the size of the reconstructed state
+        # resized_state = F.interpolate(state, size=reconstructed_predicted_next_state.shape[2:], mode='bilinear',
+        #                                    align_corners=False)
+        resized_next_state = F.interpolate(next_state, size=reconstructed_predicted_next_state.shape[2:], mode='bilinear',
+                                           align_corners=False)
+
+        # Compute reconstruction loss (MSE) between the reconstructed and resized next state
+        reconstruction_loss = self.mbt_loss(reconstructed_predicted_next_state, resized_next_state)
+        encoder_reconstruction_loss = self.mbt_loss(reconstructed_next_state, resized_next_state)
+        reconstruction_mae_loss = self.mae_loss(reconstructed_predicted_next_state, resized_next_state)
+
+
+        # --------------------
+        # VAE Loss (Reconstruction + KL Divergence)
+        # --------------------
+        # latent_transition_loss_mse = self.mse_loss(homo_latent_next_state, predicted_next_homo_latent_state)
+        # latent_transition_loss_mae = self.mae_loss(homo_latent_next_state, predicted_next_homo_latent_state)
+        # latent_transition_loss = latent_transition_loss_mse  # + latent_transition_loss_mae
+
+        # kl_loss = -0.5 * torch.sum(1 + logvar - mean.pow(2) - logvar.exp())  # * 0.1
+        # vae_loss = latent_transition_loss + 0.1 * kl_loss
+
+        # --------------------
+        # Reward Prediction Loss
+        # --------------------
+        reward_loss = self.mbt_loss(predicted_reward.squeeze(), reward)
+
+        # --------------------
+        # Done Prediction Loss
+        # --------------------
         done_loss = F.binary_cross_entropy(predicted_done.squeeze(), done.float())  # Convert done to float
 
-        predicted_next_state = self.decoder(predicted_latent_next_state)
-        resized_next_state = F.interpolate(next_state, size=predicted_next_state.shape[2:],
-                                           mode='bilinear', align_corners=False)
-        reconstruction_disc_loss = self.uni_loss(predicted_next_state, resized_next_state)
-
-        trvae_loss = vae_loss + reward_loss + done_loss + reconstruction_disc_loss
-
-        # Optimize the components except for the discriminator
-        self.trvae_optimizer.zero_grad()
-        trvae_loss.backward()
-        self.trvae_optimizer.step()
+        # --------------------
+        # Total Loss
+        # --------------------
+        # total_loss = vae_loss + reward_loss + generator_loss + done_loss
+        total_loss = reconstruction_loss + reward_loss + done_loss + encoder_reconstruction_loss  # + kl_loss * 0.1
+        self.optimizer.zero_grad()
+        total_loss.backward()
+        self.optimizer.step()
 
         # Return a dictionary with all the loss values
         loss_dict = {
-            # "latent_transition_loss": latent_transition_loss.detach().cpu().item(),
-            "reconstruction_disc_loss": reconstruction_disc_loss.detach().cpu().item(),
+            "reconstruction_loss": reconstruction_loss.detach().cpu().item(),
+            "reconstruction_mae_loss": reconstruction_mae_loss.detach().cpu().item(),
+            "encoder_reconstruction_loss": encoder_reconstruction_loss.detach().cpu().item(),
             # "kl_loss": kl_loss.detach().cpu().item(),
-            "vae_loss": vae_loss.detach().cpu().item(),
             "reward_loss": reward_loss.detach().cpu().item(),
             "done_loss": done_loss.detach().cpu().item(),
-            "trvae_loss": trvae_loss.detach().cpu().item(),
+            "total_loss": total_loss.detach().cpu().item(),
         }
 
         return loss_dict
 
-    def train_epoch(
-            self,
-            dataloader: DataLoader,
-            log_writer: SummaryWriter,
-            start_num_batches=0,
-            train_ae=False,
-            train_trvae=False,
-    ):
+    def train_epoch(self, dataloader: DataLoader, log_writer: SummaryWriter, start_num_batches=0,):
         total_samples = len(dataloader) * dataloader.batch_size
         loss_sum = 0.0
 
-        assert not (train_ae and train_trvae), "Cannot train autoencoder and the transition model at the same time!"
-        assert train_ae or train_trvae, "No model is selected to be trained!"
+        with tqdm(total=total_samples, desc="Training", unit="sample") as pbar:
+            for i, batch in enumerate(dataloader):
+                obs, actions, next_obs, rewards, dones = batch
+                loss_dict = self.train_minibatch(obs, actions, rewards, next_obs, dones)
+                total_loss = loss_dict['total_loss']
+                running_loss = loss_dict['reconstruction_mae_loss']
+                loss_sum += running_loss
+                avg_loss = loss_sum / (i + 1)
+                pbar.update(len(obs))
+                pbar.set_postfix({'total_loss': total_loss, 'reconstruction_mae_loss': running_loss, 'avg_reconstruction_mae_loss': avg_loss})
+                for key in loss_dict.keys():
+                    log_writer.add_scalar(f'{key}', loss_dict[key], i + start_num_batches)
+            else:
+                with torch.no_grad():
+                    # Logging single combined image for each sample
+                    with torch.no_grad():
+                        for idx, (ob, action, next_ob, reward, done) in enumerate(
+                                zip(obs, actions, next_obs, rewards, dones)):
+                            if idx >= 10:
+                                break
 
-        obs, actions, next_obs, rewards, dones = None, None, None, None, None,
+                            rec_ob, pred_next_ob, pred_reward, pred_done = self.forward(ob.unsqueeze(dim=0),
+                                                                                        action.unsqueeze(dim=0))
 
-        if train_ae:
-            with tqdm(total=total_samples, desc="Training Auto Encoder", unit="sample") as pbar:
-                for i, batch in enumerate(dataloader):
-                    obs, actions, next_obs, rewards, dones = batch
-                    loss_dict = self.train_autoencoder_minibatch(obs, next_obs)
-                    running_loss = loss_dict['ae_loss']
-                    loss_sum += running_loss
-                    avg_loss = loss_sum / (i + 1)
-                    pbar.update(len(obs))
-                    pbar.set_postfix(
-                        {
-                            'ae_loss': loss_dict['ae_loss'],
-                            # 'reconstruction_loss': loss_dict['reconstruction_loss'],
-                            # 'observation_channel_loss': loss_dict['observation_channel_loss'],
-                            'avg_reconstruction_loss': avg_loss,
-                        }
-                    )
-                    for key in loss_dict.keys():
-                        log_writer.add_scalar(f'{key}', loss_dict[key], i + start_num_batches)
+                            # Convert tensors from GPU to CPU and adjust dimensions for display (HWC format)
+                            ob_cpu = ob.cpu().detach().permute(1, 2, 0)  # Current observation
+                            rec_ob_cpu = rec_ob.squeeze(0).cpu().detach().permute(1, 2, 0)  # Reconstructed observation
+                            pred_next_ob_cpu = pred_next_ob.squeeze(0).cpu().detach().permute(1, 2, 0)  # Predicted next observation
+                            next_ob_cpu = next_ob.cpu().detach().permute(1, 2, 0)  # Actual next observation
 
-        elif train_trvae:
-            with tqdm(total=total_samples, desc="Training Transition Model", unit="sample") as pbar:
-                for i, batch in enumerate(dataloader):
-                    obs, actions, next_obs, rewards, dones = batch
-                    loss_dict = self.train_transition_model_minibatch(obs, actions, rewards, next_obs, dones,)
-                    running_loss = loss_dict['trvae_loss']
-                    loss_sum += running_loss
-                    avg_loss = loss_sum / (i + 1)
-                    pbar.update(len(obs))
-                    pbar.set_postfix(
-                        {
-                            'vae_loss': loss_dict['vae_loss'],
-                            'trvae_loss': loss_dict['trvae_loss'],
-                            'avg_trvae_loss': avg_loss,
-                        }
-                    )
-                    for key in loss_dict.keys():
-                        log_writer.add_scalar(f'{key}', loss_dict[key], i + start_num_batches)
+                            # Get the string label for the action from the dictionary
+                            action_str = action_dict.get(action.item(), "Unknown Action")
 
-        # Logging single combined image for each sample
-        with torch.no_grad():
-            for idx, (ob, action, next_ob, reward, done) in enumerate(
-                    zip(obs, actions, next_obs, rewards, dones)):
-                if idx >= 10:
-                    break
+                            # Create a figure to combine all visualizations and scalar information
+                            fig, axs = plt.subplots(2, 4, figsize=(16, 8))  # 2 rows, 4 columns for layout
 
-                rec_ob, pred_next_ob, pred_reward, pred_done = self.forward(ob.unsqueeze(dim=0),
-                                                                    action.unsqueeze(dim=0))
+                            # Plot images: Observation, Reconstructed Observation, Predicted Next Observation, Actual Next Observation
+                            axs[0, 0].imshow(ob_cpu)
+                            axs[0, 0].set_title('Observation')
 
-                # Convert tensors from GPU to CPU and adjust dimensions for display (HWC format)
-                ob_cpu = ob.cpu().detach().permute(1, 2, 0)  # Current observation
-                rec_ob_cpu = rec_ob.squeeze(0).cpu().detach().permute(1, 2, 0)  # Reconstructed observation
-                pred_next_ob_cpu = pred_next_ob.squeeze(0).cpu().detach().permute(1, 2, 0)  # Predicted next observation
-                next_ob_cpu = next_ob.cpu().detach().permute(1, 2, 0)  # Actual next observation
+                            axs[0, 1].imshow(rec_ob_cpu)  # Draw the reconstructed observation
+                            axs[0, 1].set_title('Reconstructed Observation')
 
-                # Get the string label for the action from the dictionary
-                action_str = action_dict.get(action.item(), "Unknown Action")
+                            axs[0, 2].imshow(pred_next_ob_cpu)
+                            axs[0, 2].set_title('Predicted Next Observation')
 
-                # Create a figure to combine all visualizations and scalar information
-                fig, axs = plt.subplots(2, 4, figsize=(16, 8))  # 2 rows, 4 columns for layout
+                            axs[0, 3].imshow(next_ob_cpu)  # Draw the actual next observation
+                            axs[0, 3].set_title('Actual Next Observation')
 
-                # Plot images: Observation, Reconstructed Observation, Predicted Next Observation, Actual Next Observation
-                axs[0, 0].imshow(ob_cpu)
-                axs[0, 0].set_title('Observation')
+                            # Plot scalar values: Action, Predicted Reward/Done, Actual Reward/Done
+                            axs[1, 0].text(0.5, 0.5, f'Action: {action_str}', horizontalalignment='center',
+                                           verticalalignment='center')
+                            axs[1, 0].set_title('Action')
+                            axs[1, 0].axis('off')
 
-                axs[0, 1].imshow(rec_ob_cpu)  # Draw the reconstructed observation
-                axs[0, 1].set_title('Reconstructed Observation')
+                            axs[1, 1].text(0.5, 0.5,
+                                           f'Predicted Reward: {pred_reward.item():.2f}\nPredicted Done: {pred_done.item():.2f}',
+                                           horizontalalignment='center', verticalalignment='center')
+                            axs[1, 1].set_title('Predicted Reward & Done')
+                            axs[1, 1].axis('off')
 
-                axs[0, 2].imshow(pred_next_ob_cpu)
-                axs[0, 2].set_title('Predicted Next Observation')
+                            axs[1, 2].text(0.5, 0.5,
+                                           f'Actual Reward: {reward.item():.2f}\nActual Done: {done.item():.2f}',
+                                           horizontalalignment='center', verticalalignment='center')
+                            axs[1, 2].set_title('Actual Reward & Done')
+                            axs[1, 2].axis('off')
 
-                axs[0, 3].imshow(next_ob_cpu)  # Draw the actual next observation
-                axs[0, 3].set_title('Actual Next Observation')
+                            # Remove the extra axis in the second row, fourth column
+                            axs[1, 3].axis('off')
 
-                # Plot scalar values: Action, Predicted Reward/Done, Actual Reward/Done
-                axs[1, 0].text(0.5, 0.5, f'Action: {action_str}', horizontalalignment='center',
-                               verticalalignment='center')
-                axs[1, 0].set_title('Action')
-                axs[1, 0].axis('off')
+                            # Convert the figure to a PIL Image and then to a Tensor
+                            buf = io.BytesIO()
+                            plt.tight_layout()
+                            plt.savefig(buf, format='png')
+                            buf.seek(0)
+                            image = Image.open(buf)
+                            image_tensor = T.ToTensor()(image)
 
-                axs[1, 1].text(0.5, 0.5,
-                               f'Predicted Reward: {pred_reward.item():.2f}\nPredicted Done: {pred_done.item():.2f}',
-                               horizontalalignment='center', verticalalignment='center')
-                axs[1, 1].set_title('Predicted Reward & Done')
-                axs[1, 1].axis('off')
+                            # Log the combined image to TensorBoard
+                            log_writer.add_image(f'{i + start_num_batches}-{idx}_combined', image_tensor,
+                                                 i + start_num_batches)
 
-                axs[1, 2].text(0.5, 0.5, f'Actual Reward: {reward.item():.2f}\nActual Done: {done.item():.2f}',
-                               horizontalalignment='center', verticalalignment='center')
-                axs[1, 2].set_title('Actual Reward & Done')
-                axs[1, 2].axis('off')
-
-                # Remove the extra axis in the second row, fourth column
-                axs[1, 3].axis('off')
-
-                # Convert the figure to a PIL Image and then to a Tensor
-                buf = io.BytesIO()
-                plt.tight_layout()
-                plt.savefig(buf, format='png')
-                buf.seek(0)
-                image = Image.open(buf)
-                image_tensor = T.ToTensor()(image)
-
-                # Log the combined image to TensorBoard
-                log_writer.add_image(f'{i + start_num_batches}-{idx}_combined', image_tensor, i + start_num_batches)
-
-                # Close the figure to free memory
-                plt.close(fig)
+                            # Close the figure to free memory
+                            plt.close(fig)
 
         return avg_loss, start_num_batches
 
@@ -828,27 +893,23 @@ class WorldModel(nn.Module):
 if __name__ == '__main__':
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    session_dir = r"./experiments/world_model-door_key"
-    dataset_samples = int(1e4)
-    dataset_repeat_each_epoch = 10
-    train_ae_epochs = 10
-    train_trvae_epochs = 50
+    session_dir = r"./experiments/full-world_model-door_key"
+    dataset_samples = int(1.5e4)
+    dataset_repeat_each_epoch = 5
+    num_epochs = 100
     batch_size = 32
-    ae_lr = 5e-4
-    trvae_lr = 1e-4
-    num_parallel = 4
+    lr = 1e-4
+    num_parallel = 6
 
     latent_shape = (8, 24, 24)  # channel, height, width
-    # num_homomorphism_channels = 16
-    movement_augmentation = 3
+    num_homomorphism_channels = 5
+
+    movement_augmentation = 6
 
     encoder_decoder_net_arch = [
+        (16, 3, 2, 1),
         (32, 3, 2, 1),
-        # (32, 3, 1, 1),
         (64, 3, 2, 1),
-        # (64, 3, 1, 1),
-        (128, 3, 1, 1),
-        # (128, 3, 1, 1),
     ]
 
     transition_model_conv_arch = [
@@ -862,12 +923,12 @@ if __name__ == '__main__':
             config = TaskConfig()
             config.name = f"door_key"
             config.rand_gen_shape = None
-            config.txt_file_path = f"./maps/door_key.txt"
+            config.txt_file_path = f"./maps/base_env.txt"
             config.custom_mission = "reach the goal"
-            config.minimum_display_size = 7
-            config.display_mode = "middle"
-            config.random_rotate = False
-            config.random_flip = False
+            config.minimum_display_size = 10
+            config.display_mode = "random"
+            config.random_rotate = True
+            config.random_flip = True
             config.max_steps = 1024
             # config.start_pos = (5, 5)
             config.train_total_steps = 2.5e7
@@ -888,6 +949,7 @@ if __name__ == '__main__':
     dataset = GymDataset(venv, data_size=dataset_samples, repeat=dataset_repeat_each_epoch, movement_augmentation=movement_augmentation)
     print(len(dataset))
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, drop_last=True)
+    print(len(dataloader))
 
     log_dir = os.path.join(session_dir, "logs")
     os.makedirs(log_dir, exist_ok=True)
@@ -895,34 +957,25 @@ if __name__ == '__main__':
 
     world_model = WorldModel(
         latent_shape=latent_shape,
-        # num_homomorphism_channels=num_homomorphism_channels,
+        num_homomorphism_channels=num_homomorphism_channels,
         obs_shape=venv.observation_space.shape,
         num_actions=venv.action_space.n,
         cnn_net_arch=encoder_decoder_net_arch,
         transition_model_conv_arch=transition_model_conv_arch,
-        ae_lr=ae_lr,
-        trvae_lr=trvae_lr,
+        lr=lr,
     ).to(device)
 
-    min_ae_loss = float('inf')
-    min_trvae_loss = float('inf')
-    start_epoch_ae = 0
-    start_epoch_trvae = 0
+    min_loss = float('inf')
+    start_epoch = 0
     try:
-        _, min_ae_loss, min_trvae_loss = world_model.load_model(save_dir=os.path.join(session_dir, 'models'), best=True)
-        start_epoch, _, _ = world_model.load_model(save_dir=os.path.join(session_dir, 'models'))
-        if min_trvae_loss < float('inf'):
-            start_epoch_trvae = start_epoch
-            start_epoch_trvae += 1
-            start_epoch_ae = train_ae_epochs
-        else:
-            start_epoch_ae = start_epoch
-            start_epoch_ae += 1
+        _, min_loss = world_model.load_model(save_dir=os.path.join(session_dir, 'models'), best=True)
+        start_epoch, _ = world_model.load_model(save_dir=os.path.join(session_dir, 'models'))
+        start_epoch += 1
     except FileNotFoundError:
         pass
 
-    for epoch in range(start_epoch_ae, train_ae_epochs):
-        print(f"Start epoch {epoch + 1} / {train_ae_epochs} for AutoEncoder training...:")
+    for epoch in range(start_epoch, num_epochs):
+        print(f"Start epoch {epoch + 1} / {num_epochs}:")
         print("Resampling dataset...")
         dataset.resample()
         print("Starting training...")
@@ -930,28 +983,8 @@ if __name__ == '__main__':
             dataloader,
             log_writer,
             start_num_batches=epoch * len(dataloader),
-            train_ae=True,
-            train_trvae=False,
         )
-        if loss < min_ae_loss:
-            min_ae_loss = loss
-            world_model.save_model(epoch, min_ae_loss, min_trvae_loss, is_best=True, save_dir=os.path.join(session_dir, 'models'))
-        world_model.save_model(epoch, min_ae_loss, min_trvae_loss, save_dir=os.path.join(session_dir, 'models'))
-
-    for epoch in range(start_epoch_trvae, train_trvae_epochs):
-        print(f"Start epoch {epoch + 1} / {train_trvae_epochs} for Transition Model training...:")
-        print("Resampling dataset...")
-        dataset.resample()
-        print("Starting training...")
-        loss, _ = world_model.train_epoch(
-            dataloader,
-            log_writer,
-            start_num_batches=epoch * len(dataloader) + train_ae_epochs * len(dataloader),
-            train_ae=False,
-            train_trvae=True,
-        )
-        if loss < min_trvae_loss:
-            min_trvae_loss = loss
-            world_model.save_model(epoch, min_ae_loss, min_trvae_loss, is_best=True,
-                                   save_dir=os.path.join(session_dir, 'models'))
-        world_model.save_model(epoch, min_ae_loss, min_trvae_loss, save_dir=os.path.join(session_dir, 'models'))
+        if loss < min_loss:
+            min_loss = loss
+            world_model.save_model(epoch, loss, is_best=True, save_dir=os.path.join(session_dir, 'models'))
+        world_model.save_model(epoch, loss, save_dir=os.path.join(session_dir, 'models'))

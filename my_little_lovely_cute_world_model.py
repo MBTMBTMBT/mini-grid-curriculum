@@ -167,6 +167,7 @@ def z_shape_activation(x, lower_bound=0.25, upper_bound=0.75, steepness=1.0):
 
     # Combine regions for Z shape
     y = (1 - lower_transition) * 0 + lower_transition * upper_transition * linear_region + (1 - upper_transition) * 1
+    y /= torch.max(y)
 
     return y
 

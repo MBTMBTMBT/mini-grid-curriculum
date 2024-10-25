@@ -1654,6 +1654,5 @@ def train_world_model_agent():
     world_model.train_session(venv, session_dir, total_samples)
 
 
-
 if __name__ == '__main__':
     train_world_model_agent()

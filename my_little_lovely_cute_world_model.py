@@ -1567,7 +1567,7 @@ def train_world_model_agent():
     session_dir = r"./experiments/discrete-world_model_agent-door_key"
     dataset_samples = 4096
     dataset_repeat_each_epoch = 25
-    dataset_repeat_times_ensemble = 5
+    dataset_repeat_times_ensemble = 10
     total_samples = 4096 * 100
     ensemble_num_models = 16
     batch_size = 32

@@ -524,10 +524,14 @@ class TransitionModelVQVAE(TransitionModel):
     def forward(self, latent_state, action):
         batch_size, latent_channels, latent_height, latent_width = latent_state.shape
 
+        # Quantization at the beginning (without grad)
+        with torch.no_grad():
+            latent_state_quantized, _, _ = self.vector_quantizer(latent_state)
+
         # Reshape action to match latent state dimensions
         action_reshaped = action.view(batch_size, self.action_dim, 1, 1).expand(batch_size, self.action_dim,
                                                                                 latent_height, latent_width)
-        x = torch.cat([latent_state, action_reshaped], dim=1)
+        x = torch.cat([latent_state_quantized, action_reshaped], dim=1)
 
         # Process through encoder
         x = self.initial_conv(x)

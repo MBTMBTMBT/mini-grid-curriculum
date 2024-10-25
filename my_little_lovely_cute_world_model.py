@@ -384,20 +384,57 @@ class TransitionModelVAE(TransitionModel):
         return z_next_decoded, mean, logvar, reward_pred, done_pred
 
 
+def compute_uniformity_loss(embedding, batch_size=None):
+    if batch_size is None or batch_size >= embedding.size(0):
+        # Use full matrix calculation
+        embedding_norm = F.normalize(embedding, p=2, dim=1)
+        similarity = torch.matmul(embedding_norm, embedding_norm.T)
+        uniformity_loss = torch.mean((similarity - torch.eye(embedding.size(0), device=similarity.device)) ** 2)
+    else:
+        # Randomly sample batch_size embeddings for loss calculation
+        indices = torch.randint(0, embedding.size(0), (batch_size,), device=embedding.device)
+        sampled_embeddings = embedding[indices]
+        embedding_norm = F.normalize(sampled_embeddings, p=2, dim=1)
+        similarity = torch.matmul(embedding_norm, embedding_norm.T)
+        uniformity_loss = torch.mean((similarity - torch.eye(batch_size, device=similarity.device)) ** 2)
+    return uniformity_loss
+
+
+def compute_smooth_range_loss(embedding, target_mean=0.0, target_std=1.0):
+    """
+    Encourage embeddings to follow a normal distribution with target mean and std.
+    """
+    mean_loss = torch.mean((embedding.mean(dim=0) - target_mean) ** 2)
+    std_loss = torch.mean((embedding.std(dim=0) - target_std) ** 2)
+    return mean_loss + std_loss
+
+
 class VectorQuantizer(nn.Module):
-    def __init__(self, num_embeddings, embedding_dim, commitment_cost=0.25):
+    def __init__(self, num_embeddings, embedding_dim, commitment_cost=0.25, range_target_mean=0.0,
+                 range_target_std=1.0, range_loss_weight=0.1, uniformity_weight=0.1, uniformity_batch_size=64):
         """
-        Vector Quantizer for VQ-VAE
-        :param num_embeddings: Number of vectors in the codebook
-        :param embedding_dim: Dimensionality of the embeddings
-        :param commitment_cost: Weight for the commitment loss
+        Vector Quantizer with dynamic expansion, commitment, range, and uniformity losses.
+
+        :param num_embeddings: Initial number of vectors in the codebook.
+        :param embedding_dim: Dimensionality of each embedding vector.
+        :param commitment_cost: Weight for the commitment loss.
+        :param range_target_mean: Target mean for embedding elements (used for range loss).
+        :param range_target_std: Target std for embedding elements (used for range loss).
+        :param range_loss_weight: Weight for the range loss.
+        :param uniformity_weight: Weight for the uniformity loss.
+        :param uniformity_batch_size: Number of embeddings to sample for uniformity loss.
         """
         super(VectorQuantizer, self).__init__()
         self.num_embeddings = num_embeddings
         self.embedding_dim = embedding_dim
         self.commitment_cost = commitment_cost
+        self.range_target_mean = range_target_mean
+        self.range_target_std = range_target_std
+        self.range_loss_weight = range_loss_weight
+        self.uniformity_weight = uniformity_weight
+        self.uniformity_batch_size = uniformity_batch_size
 
-        # Embedding table
+        # Initialize embeddings with normal distribution
         self.embedding = nn.Parameter(torch.randn(num_embeddings, embedding_dim))
 
     def forward(self, inputs):
@@ -415,12 +452,69 @@ class VectorQuantizer(nn.Module):
         # Quantize by replacing with closest embedding
         quantized = F.embedding(encoding_indices, self.embedding).view_as(inputs)
 
-        # Compute losses
+        # Standard VQ-VAE losses
         embedding_loss = F.mse_loss(quantized.detach(), inputs)
         commitment_loss = self.commitment_cost * F.mse_loss(inputs.detach(), quantized)
+
+        # Smooth range loss to encourage values within target distribution range
+        range_loss = self.range_loss_weight * compute_smooth_range_loss(
+            self.embedding, target_mean=self.range_target_mean, target_std=self.range_target_std
+        )
+
+        # Uniformity loss (using batch sampling for computational efficiency)
+        uniformity_loss = self.uniformity_weight * compute_uniformity_loss(
+            self.embedding, batch_size=self.uniformity_batch_size
+        )
+
+        # Total loss
+        total_loss = embedding_loss + commitment_loss + range_loss + uniformity_loss
+
+        # Straight-through estimator for quantization
         quantized = inputs + (quantized - inputs).detach()
 
-        return quantized, encoding_indices, embedding_loss + commitment_loss
+        return quantized, encoding_indices, total_loss
+
+    def expand_codebook(self, new_embeddings, distribution="normal"):
+        """
+        Expand the embedding table with new embeddings initialized to match range target distribution.
+        :param new_embeddings: Number of new embeddings to add.
+        :param distribution: Distribution for initializing new embeddings to match range target.
+        """
+        if distribution == "normal":
+            # Initialize to match range target mean and std
+            new_embedding_weights = torch.randn(new_embeddings, self.embedding_dim).to(
+                self.embedding.device) * self.range_target_std + self.range_target_mean
+        elif distribution == "uniform":
+            # Initialize within [-1, 1] if using uniform distribution
+            new_embedding_weights = (torch.rand(new_embeddings, self.embedding_dim) * 2 - 1).to(self.embedding.device)
+        else:
+            raise ValueError(f"Unknown distribution '{distribution}'")
+
+        # Append new embeddings to the existing embedding matrix
+        self.embedding = nn.Parameter(torch.cat([self.embedding, new_embedding_weights], dim=0))
+        self.num_embeddings += new_embeddings  # Update embedding count
+
+
+def compute_smooth_range_loss(embedding, target_mean=0.0, target_std=1.0):
+    """ Encourage embeddings to follow a normal distribution with target mean and std. """
+    mean_loss = torch.mean((embedding.mean(dim=0) - target_mean) ** 2)
+    std_loss = torch.mean((embedding.std(dim=0) - target_std) ** 2)
+    return mean_loss + std_loss
+
+
+def compute_uniformity_loss(embedding, batch_size=None):
+    """ Calculate uniformity loss based on cosine similarity, optionally using batch sampling. """
+    if batch_size is None or batch_size >= embedding.size(0):
+        embedding_norm = F.normalize(embedding, p=2, dim=1)
+        similarity = torch.matmul(embedding_norm, embedding_norm.T)
+        uniformity_loss = torch.mean((similarity - torch.eye(embedding.size(0), device=similarity.device)) ** 2)
+    else:
+        indices = torch.randint(0, embedding.size(0), (batch_size,), device=embedding.device)
+        sampled_embeddings = embedding[indices]
+        embedding_norm = F.normalize(sampled_embeddings, p=2, dim=1)
+        similarity = torch.matmul(embedding_norm, embedding_norm.T)
+        uniformity_loss = torch.mean((similarity - torch.eye(batch_size, device=similarity.device)) ** 2)
+    return uniformity_loss
 
 
 class TransitionModelVQVAE(TransitionModel):
@@ -459,9 +553,9 @@ class TransitionModelVQVAE(TransitionModel):
         return z_quantized, reward_pred, done_pred, vq_loss
 
 
-class TransitionModelVQVAEVAE(TransitionModelVAE):
+class _TransitionModelVQVAEVAE(TransitionModelVAE):
     def __init__(self, latent_shape, action_dim, conv_arch, num_embeddings=512):
-        super(TransitionModelVQVAEVAE, self).__init__(latent_shape, action_dim, conv_arch)
+        super(_TransitionModelVQVAEVAE, self).__init__(latent_shape, action_dim, conv_arch)
         embedding_dim = latent_shape[0]  # embedding_dim based on the output channels of decoder
 
         # Vector quantizer

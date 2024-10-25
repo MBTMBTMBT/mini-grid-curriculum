@@ -1573,7 +1573,7 @@ def train_world_model_agent():
     lr = 1e-4
     num_parallel = 6
     ensemble_epsilon = 0.2
-    num_embeddings = 64
+    num_embeddings = 128
     commitment_cost = 0.25
     range_target_mean = 0.0
     range_target_std = 1.0

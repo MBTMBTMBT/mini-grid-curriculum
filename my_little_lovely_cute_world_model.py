@@ -384,29 +384,26 @@ class TransitionModelVAE(TransitionModel):
         return z_next_decoded, mean, logvar, reward_pred, done_pred
 
 
+def compute_smooth_range_loss(embedding, target_mean=0.0, target_std=1.0):
+    """ Encourage embeddings to follow a normal distribution with target mean and std. """
+    mean_loss = torch.mean((embedding.mean(dim=0) - target_mean) ** 2)
+    std_loss = torch.mean((embedding.std(dim=0) - target_std) ** 2)
+    return mean_loss + std_loss
+
+
 def compute_uniformity_loss(embedding, batch_size=None):
+    """ Calculate uniformity loss based on cosine similarity, optionally using batch sampling. """
     if batch_size is None or batch_size >= embedding.size(0):
-        # Use full matrix calculation
         embedding_norm = F.normalize(embedding, p=2, dim=1)
         similarity = torch.matmul(embedding_norm, embedding_norm.T)
         uniformity_loss = torch.mean((similarity - torch.eye(embedding.size(0), device=similarity.device)) ** 2)
     else:
-        # Randomly sample batch_size embeddings for loss calculation
         indices = torch.randint(0, embedding.size(0), (batch_size,), device=embedding.device)
         sampled_embeddings = embedding[indices]
         embedding_norm = F.normalize(sampled_embeddings, p=2, dim=1)
         similarity = torch.matmul(embedding_norm, embedding_norm.T)
         uniformity_loss = torch.mean((similarity - torch.eye(batch_size, device=similarity.device)) ** 2)
     return uniformity_loss
-
-
-def compute_smooth_range_loss(embedding, target_mean=0.0, target_std=1.0):
-    """
-    Encourage embeddings to follow a normal distribution with target mean and std.
-    """
-    mean_loss = torch.mean((embedding.mean(dim=0) - target_mean) ** 2)
-    std_loss = torch.mean((embedding.std(dim=0) - target_std) ** 2)
-    return mean_loss + std_loss
 
 
 class VectorQuantizer(nn.Module):
@@ -495,35 +492,34 @@ class VectorQuantizer(nn.Module):
         self.num_embeddings += new_embeddings  # Update embedding count
 
 
-def compute_smooth_range_loss(embedding, target_mean=0.0, target_std=1.0):
-    """ Encourage embeddings to follow a normal distribution with target mean and std. """
-    mean_loss = torch.mean((embedding.mean(dim=0) - target_mean) ** 2)
-    std_loss = torch.mean((embedding.std(dim=0) - target_std) ** 2)
-    return mean_loss + std_loss
-
-
-def compute_uniformity_loss(embedding, batch_size=None):
-    """ Calculate uniformity loss based on cosine similarity, optionally using batch sampling. """
-    if batch_size is None or batch_size >= embedding.size(0):
-        embedding_norm = F.normalize(embedding, p=2, dim=1)
-        similarity = torch.matmul(embedding_norm, embedding_norm.T)
-        uniformity_loss = torch.mean((similarity - torch.eye(embedding.size(0), device=similarity.device)) ** 2)
-    else:
-        indices = torch.randint(0, embedding.size(0), (batch_size,), device=embedding.device)
-        sampled_embeddings = embedding[indices]
-        embedding_norm = F.normalize(sampled_embeddings, p=2, dim=1)
-        similarity = torch.matmul(embedding_norm, embedding_norm.T)
-        uniformity_loss = torch.mean((similarity - torch.eye(batch_size, device=similarity.device)) ** 2)
-    return uniformity_loss
-
-
 class TransitionModelVQVAE(TransitionModel):
-    def __init__(self, latent_shape, action_dim, conv_arch, num_embeddings=512):
+    def __init__(
+            self,
+            latent_shape,
+            action_dim,
+            conv_arch,
+            num_embeddings=128,
+            commitment_cost=0.25,
+            range_target_mean=0.0,
+            range_target_std=1.0,
+            range_loss_weight=0.1,
+            uniformity_weight=0.1,
+            uniformity_batch_size=64,
+    ):
         super(TransitionModelVQVAE, self).__init__(latent_shape, action_dim, conv_arch)
         embedding_dim = latent_shape[0]  # embedding_dim based on the output channels of decoder
 
         # Vector quantizer
-        self.vector_quantizer = VectorQuantizer(num_embeddings, embedding_dim)
+        self.vector_quantizer = VectorQuantizer(
+            num_embeddings,
+            embedding_dim,
+            commitment_cost,
+            range_target_mean,
+            range_target_std,
+            range_loss_weight,
+            uniformity_weight,
+            uniformity_batch_size,
+        )
 
     def forward(self, latent_state, action):
         batch_size, latent_channels, latent_height, latent_width = latent_state.shape
@@ -543,8 +539,8 @@ class TransitionModelVQVAE(TransitionModel):
         # Apply vector quantization on the output of decoder
         z_quantized, _, vq_loss = self.vector_quantizer(z_next_decoded)
 
-        # Apply Sigmoid to limit the output range between [0, 1]
-        z_quantized = torch.sigmoid(z_quantized)
+        # # Apply Sigmoid to limit the output range between [0, 1]
+        # z_quantized = torch.sigmoid(z_quantized)
 
         # Reward and done predictions
         reward_pred = self.reward_predictor(x)

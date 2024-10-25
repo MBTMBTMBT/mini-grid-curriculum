@@ -1564,8 +1564,8 @@ def train_world_model_agent():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     session_dir = r"./experiments/discrete-world_model_agent-door_key"
-    dataset_samples = 1024
-    dataset_repeat_each_epoch = 20
+    dataset_samples = 4096
+    dataset_repeat_each_epoch = 25
     dataset_repeat_times_ensemble = 5
     total_samples = 4096 * 100
     ensemble_num_models = 8

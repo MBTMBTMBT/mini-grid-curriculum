@@ -251,7 +251,7 @@ class Decoder(nn.Module):
 
         # Add the final transposed convolution to ensure output channels match the original image channels
         deconv_layers.append(nn.ConvTranspose2d(in_channels, channels, kernel_size=3, stride=1, padding=1))
-        # deconv_layers.append(nn.Sigmoid())  # Output pixel values in the range [0, 1]
+        deconv_layers.append(nn.Sigmoid())  # Output pixel values in the range [0, 1]
 
         self.decoder = nn.Sequential(*deconv_layers)
 
@@ -805,8 +805,8 @@ class WorldModel(nn.Module):
         predicted_reconstructed_state = self.decoder(latent_state)
         predicted_reconstructed_next_state = self.decoder(predicted_next_state)
 
-        predicted_reconstructed_state = z_shape_activation(predicted_reconstructed_state)
-        predicted_reconstructed_next_state = z_shape_activation(predicted_reconstructed_next_state)
+        # predicted_reconstructed_state = z_shape_activation(predicted_reconstructed_state)
+        # predicted_reconstructed_next_state = z_shape_activation(predicted_reconstructed_next_state)
 
         # **Resize the next state** to match the size of the reconstructed state
         resized_predicted_next_state = F.interpolate(predicted_reconstructed_next_state, size=state.shape[2:],

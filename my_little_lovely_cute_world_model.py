@@ -144,6 +144,33 @@ class FlexibleThresholdedLoss(nn.Module):
         return total_loss
 
 
+def z_shape_activation(x, lower_bound=0.25, upper_bound=0.75, steepness=1.0):
+    """
+    Z-shape activation function with three regions:
+    - Low region: output close to 0
+    - Middle region: output close to y = x
+    - High region: output close to 1
+    Args:
+        x (torch.Tensor): Input tensor.
+        lower_bound (float): Start of the linear middle region.
+        upper_bound (float): End of the linear middle region.
+        steepness (float): Controls the smoothness of transitions.
+    Returns:
+        torch.Tensor: Output tensor in the range [0, 1] with a Z-shape.
+    """
+    # Transition functions to smooth the edges of each region
+    lower_transition = torch.sigmoid((x - lower_bound) * steepness)
+    upper_transition = torch.sigmoid((upper_bound - x) * steepness)
+
+    # Middle region approximates y = x
+    linear_region = x
+
+    # Combine regions for Z shape
+    y = (1 - lower_transition) * 0 + lower_transition * upper_transition * linear_region + (1 - upper_transition) * 1
+
+    return y
+
+
 # Function to calculate the input size based on the cnn_net_arch and target latent size
 def calculate_input_size(latent_size, cnn_net_arch):
     size = latent_size
@@ -199,7 +226,7 @@ class Encoder(nn.Module):
         if len(x.shape) == 3:  # If the input is missing the batch dimension
             x = x.unsqueeze(0)  # Add the batch dimension
         x = self.resize(x)
-        return F.sigmoid(self.encoder(x))
+        return F.tanh(self.encoder(x))
 
 
 class Decoder(nn.Module):
@@ -223,7 +250,7 @@ class Decoder(nn.Module):
 
         # Add the final transposed convolution to ensure output channels match the original image channels
         deconv_layers.append(nn.ConvTranspose2d(in_channels, channels, kernel_size=3, stride=1, padding=1))
-        deconv_layers.append(nn.Sigmoid())  # Output pixel values in the range [0, 1]
+        # deconv_layers.append(nn.Sigmoid())  # Output pixel values in the range [0, 1]
 
         self.decoder = nn.Sequential(*deconv_layers)
 
@@ -332,7 +359,7 @@ class TransitionModel(nn.Module):
 
         # Process through decoder
         z_next_decoded = self.deconv_decoder(x)
-        z_next_decoded = F.sigmoid(z_next_decoded)  # Sigmoid activation for output scaling
+        z_next_decoded = F.tanh(z_next_decoded)  # activation for output scaling
 
         # Reward and done prediction
         x = self.reward_done_conv(x)
@@ -374,7 +401,7 @@ class TransitionModelVAE(TransitionModel):
 
         # Process through decoder
         z_next_decoded = self.deconv_decoder(z_next)
-        z_next_decoded = F.sigmoid(z_next_decoded)  # Sigmoid activation for output scaling
+        z_next_decoded = F.tanh(z_next_decoded)  # activation for output scaling
 
         # Reward and done prediction
         x = self.reward_done_conv(x)
@@ -432,11 +459,11 @@ class VectorQuantizer(nn.Module):
         self.uniformity_batch_size = uniformity_batch_size
 
         # Initialize embeddings with normal distribution
-        self.embedding = nn.Parameter(torch.randn(num_embeddings, embedding_dim))
+        self.embedding = nn.Parameter(torch.randn(num_embeddings, int(np.prod(self.embedding_dim))))
 
     def forward(self, inputs):
         # Flatten inputs except the last dimension
-        flat_inputs = inputs.view(-1, self.embedding_dim)
+        flat_inputs = inputs.view(inputs.size(0), -1)
 
         # Compute L2 distances between input vectors and embeddings
         distances = torch.sum(flat_inputs ** 2, dim=1, keepdim=True) + \
@@ -477,13 +504,15 @@ class VectorQuantizer(nn.Module):
         :param new_embeddings: Number of new embeddings to add.
         :param distribution: Distribution for initializing new embeddings to match range target.
         """
+        flattened_embedding_dim = int(np.prod(self.embedding_dim))
         if distribution == "normal":
-            # Initialize to match range target mean and std
-            new_embedding_weights = torch.randn(new_embeddings, self.embedding_dim).to(
+            # Initialize with normal distribution
+            new_embedding_weights = torch.randn(new_embeddings, flattened_embedding_dim).to(
                 self.embedding.device) * self.range_target_std + self.range_target_mean
         elif distribution == "uniform":
-            # Initialize within [-1, 1] if using uniform distribution
-            new_embedding_weights = (torch.rand(new_embeddings, self.embedding_dim) * 2 - 1).to(self.embedding.device)
+            # Initialize with uniform distribution within [-1, 1]
+            new_embedding_weights = (torch.rand(new_embeddings, flattened_embedding_dim) * 2 - 1).to(
+                self.embedding.device)
         else:
             raise ValueError(f"Unknown distribution '{distribution}'")
 
@@ -507,12 +536,12 @@ class TransitionModelVQVAE(TransitionModel):
             uniformity_batch_size=64,
     ):
         super(TransitionModelVQVAE, self).__init__(latent_shape, action_dim, conv_arch)
-        embedding_dim = latent_shape[0]  # embedding_dim based on the output channels of decoder
+        # embedding_dim = latent_shape[0]  # embedding_dim based on the output channels of decoder
 
         # Vector quantizer
         self.vector_quantizer = VectorQuantizer(
             num_embeddings,
-            embedding_dim,
+            latent_shape,
             commitment_cost,
             range_target_mean,
             range_target_std,
@@ -706,6 +735,13 @@ class WorldModel(nn.Module):
             cnn_net_arch: List[Tuple[int, int, int, int]],
             transition_model_conv_arch: List[Tuple[int, int, int, int]],
             lr: float = 1e-4,
+            num_embeddings=128,
+            commitment_cost=0.25,
+            range_target_mean=0.0,
+            range_target_std=1.0,
+            range_loss_weight=0.1,
+            uniformity_weight=0.1,
+            uniformity_batch_size=64,
     ):
         super(WorldModel, self).__init__()
         self.latent_shape = latent_shape
@@ -713,7 +749,18 @@ class WorldModel(nn.Module):
         self.homomorphism_latent_space = (num_homomorphism_channels, latent_shape[1], latent_shape[2])
         self.encoder = Encoder(obs_shape, latent_shape, cnn_net_arch)
         self.decoder = Decoder(latent_shape, obs_shape, cnn_net_arch)
-        self.transition_model = TransitionModel(self.homomorphism_latent_space, num_actions, transition_model_conv_arch)
+        self.transition_model = TransitionModelVQVAE(
+            self.homomorphism_latent_space,
+            num_actions,
+            transition_model_conv_arch,
+            num_embeddings=num_embeddings,
+            commitment_cost=commitment_cost,
+            range_target_mean=range_target_mean,
+            range_target_std=range_target_std,
+            range_loss_weight=range_loss_weight,
+            uniformity_weight=uniformity_weight,
+            uniformity_batch_size=uniformity_batch_size,
+        )
         # self.transition_model = SimpleTransitionModel(self.homomorphism_latent_space, num_actions, transition_model_conv_arch)
 
         self.num_actions = num_actions
@@ -746,7 +793,7 @@ class WorldModel(nn.Module):
         action = F.one_hot(action, self.num_actions).type(torch.float)
         # predicted_next_homo_latent_state, mean, logvar, predicted_reward, predicted_done \
         #     = self.transition_model(homo_latent_state, action)
-        predicted_next_homo_latent_state, predicted_reward, predicted_done \
+        predicted_next_homo_latent_state, predicted_reward, predicted_done, _ \
             = self.transition_model(homo_latent_state, action)
 
         # Make homomorphism next state
@@ -756,6 +803,9 @@ class WorldModel(nn.Module):
         # Reconstruct the predicted next state
         predicted_reconstructed_state = self.decoder(latent_state)
         predicted_reconstructed_next_state = self.decoder(predicted_next_state)
+
+        predicted_reconstructed_state = z_shape_activation(predicted_reconstructed_state)
+        predicted_reconstructed_next_state = z_shape_activation(predicted_reconstructed_next_state)
 
         # **Resize the next state** to match the size of the reconstructed state
         resized_predicted_next_state = F.interpolate(predicted_reconstructed_next_state, size=state.shape[2:],
@@ -820,7 +870,7 @@ class WorldModel(nn.Module):
         action = F.one_hot(action, self.num_actions).type(torch.float)
         # predicted_next_homo_latent_state, mean, logvar, predicted_reward, predicted_done \
         #     = self.transition_model(homo_latent_state, action)
-        predicted_next_homo_latent_state, predicted_reward, predicted_done \
+        predicted_next_homo_latent_state, predicted_reward, predicted_done, vq_loss \
             = self.transition_model(homo_latent_state, action)
 
         # Make homomorphism next state
@@ -876,7 +926,7 @@ class WorldModel(nn.Module):
         # Total Loss
         # --------------------
         # total_loss = vae_loss + reward_loss + generator_loss + done_loss
-        total_loss = reconstruction_loss + reward_loss + done_loss + encoder_reconstruction_loss  # + kl_loss * 0.1
+        total_loss = reconstruction_loss + reward_loss + done_loss + encoder_reconstruction_loss + vq_loss  # + kl_loss * 0.1
         self.optimizer.zero_grad()
         total_loss.backward()
         self.optimizer.step()
@@ -886,6 +936,7 @@ class WorldModel(nn.Module):
             "reconstruction_loss": reconstruction_loss.detach().cpu().item(),
             "reconstruction_mae_loss": reconstruction_mae_loss.detach().cpu().item(),
             "encoder_reconstruction_loss": encoder_reconstruction_loss.detach().cpu().item(),
+            "vq_loss": vq_loss.detach().cpu().item(),
             # "kl_loss": kl_loss.detach().cpu().item(),
             "reward_loss": reward_loss.detach().cpu().item(),
             "done_loss": done_loss.detach().cpu().item(),
@@ -1236,6 +1287,13 @@ class WorldModelAgent(WorldModel):
             dataset_repeat_times_ensemble: int = 5,
             ensemble_epsilon: float = 0.1,
             batch_size: int = 32,
+            num_embeddings=128,
+            commitment_cost=0.25,
+            range_target_mean=0.0,
+            range_target_std=1.0,
+            range_loss_weight=0.1,
+            uniformity_weight=0.1,
+            uniformity_batch_size=64,
     ):
         if ensemble_net_arch is None:
             ensemble_net_arch = [
@@ -1250,6 +1308,13 @@ class WorldModelAgent(WorldModel):
             cnn_net_arch,
             transition_model_conv_arch,
             lr,
+            num_embeddings=num_embeddings,
+            commitment_cost=commitment_cost,
+            range_target_mean=range_target_mean,
+            range_target_std=range_target_std,
+            range_loss_weight=range_loss_weight,
+            uniformity_weight=uniformity_weight,
+            uniformity_batch_size=uniformity_batch_size,
         )
         self.dataset = WorldModelAgentDataset(samples_per_epoch, dataset_repeat_times)
         self.dataset_ensemble = WorldModelAgentDataset(samples_per_epoch, dataset_repeat_times_ensemble)
@@ -1432,7 +1497,7 @@ def train_world_model():
         config.display_mode = "random"
         config.random_rotate = True
         config.random_flip = True
-        config.max_steps = 1024
+        config.max_steps = 4096
         # config.start_pos = (5, 5)
         config.train_total_steps = 2.5e7
         config.difficulty_level = 0
@@ -1497,8 +1562,8 @@ def train_world_model():
 def train_world_model_agent():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    session_dir = r"./experiments/world_model_agent-door_key"
-    dataset_samples = 4096
+    session_dir = r"./experiments/discrete-world_model_agent-door_key"
+    dataset_samples = 1024
     dataset_repeat_each_epoch = 20
     dataset_repeat_times_ensemble = 5
     total_samples = 4096 * 100
@@ -1507,6 +1572,13 @@ def train_world_model_agent():
     lr = 1e-4
     num_parallel = 6
     ensemble_epsilon = 0.2
+    num_embeddings = 64
+    commitment_cost = 0.25
+    range_target_mean = 0.0
+    range_target_std = 1.0
+    range_loss_weight = 0.1
+    uniformity_weight = 0.1
+    uniformity_batch_size = 32
 
     latent_shape = (8, 24, 24)  # channel, height, width
     num_homomorphism_channels = 5
@@ -1567,8 +1639,15 @@ def train_world_model_agent():
         ensemble_net_arch = transition_model_conv_arch,
         ensemble_lr=lr,
         dataset_repeat_times_ensemble=dataset_repeat_times_ensemble,
-        ensemble_epsilon = ensemble_epsilon,
-        batch_size = batch_size,
+        ensemble_epsilon=ensemble_epsilon,
+        batch_size=batch_size,
+        num_embeddings=num_embeddings,
+        commitment_cost=commitment_cost,
+        range_target_mean=range_target_mean,
+        range_target_std=range_target_std,
+        range_loss_weight=range_loss_weight,
+        uniformity_weight=uniformity_weight,
+        uniformity_batch_size=uniformity_batch_size,
     ).to(device)
 
     world_model.train_session(venv, session_dir, total_samples)

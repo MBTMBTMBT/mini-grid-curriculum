@@ -1298,8 +1298,8 @@ class WorldModelAgent(WorldModel):
     ):
         if ensemble_net_arch is None:
             ensemble_net_arch = [
-                (64, 3, 1, 1),
-                (64, 3, 1, 1),
+                (64, 3, 2, 1),
+                (64, 3, 2, 1),
             ]
         super(WorldModelAgent, self).__init__(
             latent_shape,
@@ -1322,7 +1322,8 @@ class WorldModelAgent(WorldModel):
         self.dataloader = DataLoader(self.dataset, batch_size=batch_size, shuffle=True)
         self.dataloader_ensemble = DataLoader(self.dataset_ensemble, batch_size=batch_size, shuffle=True)
         self.ensemble_model = EnsembleTransitionModel(
-            (num_homomorphism_channels, latent_shape[1], latent_shape[2]),
+            #(num_homomorphism_channels, latent_shape[1], latent_shape[2]),
+            latent_shape,
             num_actions,
             ensemble_net_arch,
             num_models=ensemble_num_models,
@@ -1377,8 +1378,8 @@ class WorldModelAgent(WorldModel):
             # Encode the current and next state
             latent_state = self.encoder(state)
             # Make homomorphism state
-            homo_latent_state = latent_state[:, 0:self.num_homomorphism_channels, :, :]
-        return self.ensemble_model.select_action_integers(homo_latent_state, num_actions, temperature)
+            # homo_latent_state = latent_state[:, 0:self.num_homomorphism_channels, :, :]
+        return self.ensemble_model.select_action_integers(latent_state, num_actions, temperature)
 
     def train_epoch(self, dataloader: DataLoader, dataloader_ensemble: DataLoader, log_writer: SummaryWriter, start_num_batches=0,):
         device = next(self.parameters()).device
@@ -1398,10 +1399,10 @@ class WorldModelAgent(WorldModel):
                 dones = dones.to(device)
                 latent_state, next_latent_state = self.encoder(state), self.encoder(next_state)
                 # Make homomorphism state
-                homo_latent_state = latent_state[:, 0:self.num_homomorphism_channels, :, :]
-                next_homo_latent_state = next_latent_state[:, 0:self.num_homomorphism_channels, :, :]
+                # homo_latent_state = latent_state[:, 0:self.num_homomorphism_channels, :, :]
+                # next_homo_latent_state = next_latent_state[:, 0:self.num_homomorphism_channels, :, :]
                 ensemble_loss = self.ensemble_model.compute_minibatch_loss(
-                    homo_latent_state, actions, next_homo_latent_state, rewards, dones, self.mse_loss
+                    latent_state, actions, next_latent_state, rewards, dones, self.mse_loss
                 )
                 self.ensemble_optimizer.zero_grad()
                 ensemble_loss.backward()
@@ -1568,7 +1569,7 @@ def train_world_model_agent():
     dataset_repeat_each_epoch = 25
     dataset_repeat_times_ensemble = 5
     total_samples = 4096 * 100
-    ensemble_num_models = 8
+    ensemble_num_models = 16
     batch_size = 32
     lr = 1e-4
     num_parallel = 6

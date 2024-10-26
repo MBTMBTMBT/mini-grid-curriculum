@@ -480,25 +480,37 @@ class VectorQuantizer(nn.Module):
 
         # Standard VQ-VAE losses
         embedding_loss = F.mse_loss(quantized.detach(), inputs)
-        commitment_loss = self.commitment_cost * F.mse_loss(inputs.detach(), quantized)
+        commitment_loss = F.mse_loss(inputs.detach(), quantized)
 
         # Smooth range loss to encourage values within target distribution range
-        range_loss = self.range_loss_weight * compute_smooth_range_loss(
+        range_loss = compute_smooth_range_loss(
             self.embedding, target_mean=self.range_target_mean, target_std=self.range_target_std
         )
 
         # Uniformity loss (using batch sampling for computational efficiency)
-        uniformity_loss = self.uniformity_weight * compute_uniformity_loss(
+        uniformity_loss = compute_uniformity_loss(
             self.embedding, batch_size=self.uniformity_batch_size
         )
 
         # Total loss
-        total_loss = embedding_loss + commitment_loss + range_loss + uniformity_loss
+        total_loss = (
+                embedding_loss +
+                self.commitment_cost * commitment_loss +
+                self.range_loss_weight * range_loss +
+                self.uniformity_weight * uniformity_loss
+        )
 
         # Straight-through estimator for quantization
         quantized = inputs + (quantized - inputs).detach()
 
-        return quantized, encoding_indices, total_loss
+        loss_dict = {
+            "embedding_loss": embedding_loss.detach().cpu().item(),
+            "commitment_loss": commitment_loss.detach().cpu().item(),
+            "range_loss": range_loss.detach().cpu().item(),
+            "uniformity_loss": uniformity_loss.detach().cpu().item(),
+        }
+
+        return quantized, encoding_indices, total_loss, loss_dict
 
     def expand_codebook(self, new_embeddings, distribution="normal"):
         """
@@ -557,7 +569,7 @@ class TransitionModelVQVAE(TransitionModel):
 
         # Quantization at the beginning (without grad)
         with torch.no_grad():
-            latent_state_quantized, _, _ = self.vector_quantizer(latent_state)
+            latent_state_quantized, _, _, _ = self.vector_quantizer(latent_state)
 
         # Reshape action to match latent state dimensions
         action_reshaped = action.view(batch_size, self.action_dim, 1, 1).expand(batch_size, self.action_dim,
@@ -572,7 +584,7 @@ class TransitionModelVQVAE(TransitionModel):
         z_next_decoded = self.deconv_decoder(x)
 
         # Apply vector quantization on the output of decoder
-        z_quantized, _, vq_loss = self.vector_quantizer(z_next_decoded)
+        z_quantized, _, vq_loss, vq_loss_dict = self.vector_quantizer(z_next_decoded)
 
         # # Apply Sigmoid to limit the output range between [0, 1]
         # z_quantized = torch.sigmoid(z_quantized)
@@ -581,7 +593,7 @@ class TransitionModelVQVAE(TransitionModel):
         reward_pred = self.reward_predictor(x)
         done_pred = self.done_predictor(x)
 
-        return z_quantized, reward_pred, done_pred, vq_loss
+        return z_quantized, reward_pred, done_pred, vq_loss, vq_loss_dict
 
 
 class _TransitionModelVQVAEVAE(TransitionModelVAE):
@@ -798,7 +810,7 @@ class WorldModel(nn.Module):
         action = F.one_hot(action, self.num_actions).type(torch.float)
         # predicted_next_homo_latent_state, mean, logvar, predicted_reward, predicted_done \
         #     = self.transition_model(homo_latent_state, action)
-        predicted_next_homo_latent_state, predicted_reward, predicted_done, _ \
+        predicted_next_homo_latent_state, predicted_reward, predicted_done, _, _ \
             = self.transition_model(homo_latent_state, action)
 
         # Make homomorphism next state
@@ -875,7 +887,7 @@ class WorldModel(nn.Module):
         action = F.one_hot(action, self.num_actions).type(torch.float)
         # predicted_next_homo_latent_state, mean, logvar, predicted_reward, predicted_done \
         #     = self.transition_model(homo_latent_state, action)
-        predicted_next_homo_latent_state, predicted_reward, predicted_done, vq_loss \
+        predicted_next_homo_latent_state, predicted_reward, predicted_done, vq_loss, vq_loss_dict \
             = self.transition_model(homo_latent_state, action)
 
         # Make homomorphism next state
@@ -947,6 +959,9 @@ class WorldModel(nn.Module):
             "done_loss": done_loss.detach().cpu().item(),
             "total_loss": total_loss.detach().cpu().item(),
         }
+
+        for k in vq_loss_dict.keys():
+            loss_dict[k] = vq_loss_dict[k]
 
         return loss_dict
 

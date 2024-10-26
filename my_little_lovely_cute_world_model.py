@@ -1624,8 +1624,8 @@ class WorldModelAgent(WorldModel):
             loss, _ = self.train_epoch(self.dataloader, self.dataloader_ensemble, log_writer, start_num_batches=epoch * len(self.dataloader))
 
             graph_dict = self.transition_model.get_state_action_graph()
-            # print("State-Action graph:")
-            # print(graph_dict)
+            print("State-Action graph:")
+            print(graph_dict)
             plot_graph(
                 graph_dict,
                 writer=log_writer,

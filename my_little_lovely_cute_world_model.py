@@ -3,6 +3,8 @@ import os
 import random
 from typing import Tuple, List, Optional, Any
 
+import PIL
+import networkx as nx
 import numpy as np
 import torch
 import torch.nn as nn
@@ -563,6 +565,7 @@ class TransitionModelVQVAE(TransitionModel):
     ):
         super(TransitionModelVQVAE, self).__init__(latent_shape, action_dim, conv_arch)
         # embedding_dim = latent_shape[0]  # embedding_dim based on the output channels of decoder
+        self.latent_shape = latent_shape
 
         # Vector quantizer
         self.vector_quantizer = VectorQuantizer(
@@ -610,12 +613,13 @@ class TransitionModelVQVAE(TransitionModel):
     def idx_forward(self, idx, action):
         with torch.no_grad():
             latent_state = self.vector_quantizer.get_batch_encodings(idx)
-            batch_size, latent_channels, latent_height, latent_width = latent_state.shape
+            batch_size = latent_state.shape[0]
+            latent_channels, latent_height, latent_width = self.latent_shape
 
             # Reshape action to match latent state dimensions
             action_reshaped = action.view(batch_size, self.action_dim, 1, 1).expand(batch_size, self.action_dim,
                                                                                     latent_height, latent_width)
-            x = torch.cat([latent_state, action_reshaped], dim=1)
+            x = torch.cat([latent_state.view((batch_size, *self.latent_shape)), action_reshaped], dim=1)
 
             # Process through encoder
             x = self.initial_conv(x)
@@ -637,7 +641,7 @@ class TransitionModelVQVAE(TransitionModel):
         return pred_idx, reward_pred, done_pred, vq_loss, vq_loss_dict
 
     def get_state_action_graph(self, batch_size=16):
-        ideces = [range(self.vector_quantizer.num_embeddings)]
+        ideces = [i for i in range(self.vector_quantizer.num_embeddings)]
         # Initialise an empty list to store the batches
         batched_ideces = []
         # Iterate through the list with step of batch_size
@@ -653,12 +657,72 @@ class TransitionModelVQVAE(TransitionModel):
             graph_dict[i] = {}
         for idxs in batched_ideces:
             for act in range(self.action_dim):
-                acts = torch.ones_like(idxs) * act
-                pred_idx, reward_pred, done_pred, _, _ = self.idx_forward(idxs, acts)
+                acts = (torch.ones_like(idxs) * act).squeeze().long()
+                acts_ = F.one_hot(acts, self.action_dim).type(torch.float)
+                pred_idx, reward_pred, done_pred, _, _ = self.idx_forward(idxs, acts_)
                 for i, a, ni, r, d in zip(idxs, acts, pred_idx, reward_pred, done_pred):
                     graph_dict[i.cpu().item()][a.cpu().item()] = (ni.cpu().item(), r.cpu().item(), d.cpu().item())
 
         return graph_dict
+
+
+def plot_graph(graph_dict, writer: SummaryWriter, draw_self_loops=False, highlight_done=True, show_edge_labels=False, tag="graph"):
+    """
+    Plot the graph and save it to TensorBoard.
+
+    Parameters:
+        graph_dict (dict): Definition of nodes and edges, format is {start_node: {action: (next_node, reward, done)}}.
+        writer (SummaryWriter): TensorBoard writer to save the plot.
+        draw_self_loops (bool): Whether to plot self-loops (edges where start_node == next_node).
+        highlight_done (bool): Whether to highlight edges with done status as True.
+        show_edge_labels (bool): Whether to display labels on edges.
+        tag (str): Name used as tag in TensorBoard, default is 'graph'.
+    """
+
+    # Create a directed graph
+    G = nx.DiGraph()
+
+    # Add nodes and edges based on the graph dictionary
+    for start_node, actions in graph_dict.items():
+        for action, (next_node, reward, done) in actions.items():
+            # Skip self-loops if draw_self_loops is False
+            if not draw_self_loops and start_node == next_node:
+                continue
+
+            # Create edge label if show_edge_labels is True
+            edge_label = f"action: {action}, reward: {reward}, done: {done}" if show_edge_labels else None
+            # Set edge colour based on highlight_done parameter
+            edge_colour = 'red' if highlight_done and done else 'grey'
+
+            # Add the edge to the graph with additional colour attribute
+            G.add_edge(start_node, next_node, label=edge_label, colour=edge_colour)
+
+    # Define node layout
+    pos = nx.spring_layout(G)  # Layout for nodes
+
+    # Draw nodes and edges with specified attributes
+    plt.figure(figsize=(15, 15))
+    edge_colours = [G[u][v]['colour'] for u, v in G.edges()]  # Use defined edge colours
+    nx.draw(G, pos, with_labels=True, node_size=700, font_size=10, font_weight='bold', node_color='skyblue',
+            edge_color=edge_colours)
+
+    # Optionally add edge labels
+    if show_edge_labels:
+        edge_labels = nx.get_edge_attributes(G, 'label')
+        nx.draw_networkx_edge_labels(G, pos, edge_labels=edge_labels, font_size=8, label_pos=0.5)
+
+    # Render the plot to an in-memory file
+    buf = io.BytesIO()
+    plt.savefig(buf, format="png")  # Save figure to the in-memory buffer as PNG
+    buf.seek(0)
+    img = PIL.Image.open(buf)
+
+    # Add image to TensorBoard with the specified tag
+    writer.add_image(tag, torch.tensor(img).permute(2, 0, 1) / 255.0, global_step=0)  # Convert to tensor format expected by TensorBoard
+
+    # Clean up resources
+    buf.close()
+    plt.close()
 
 
 class _TransitionModelVQVAEVAE(TransitionModelVAE):
@@ -1556,8 +1620,16 @@ class WorldModelAgent(WorldModel):
             loss, _ = self.train_epoch(self.dataloader, self.dataloader_ensemble, log_writer, start_num_batches=epoch * len(self.dataloader))
 
             graph_dict = self.transition_model.get_state_action_graph()
-            print("State-Action graph:")
-            print(graph_dict)
+            # print("State-Action graph:")
+            # print(graph_dict)
+            plot_graph(
+                graph_dict,
+                writer=log_writer,
+                draw_self_loops=False,
+                highlight_done=True,
+                show_edge_labels=False,
+                tag=f'{epoch}-graph',
+            )
 
             if loss < min_loss:
                 min_loss = loss
@@ -1679,7 +1751,7 @@ def train_world_model_agent():
     lr = 1e-4
     num_parallel = 6
     ensemble_epsilon = 0.1
-    num_embeddings = 128
+    num_embeddings = 32
     commitment_cost = 0.25
     range_target_mean = 0.0
     range_target_std = 1.0

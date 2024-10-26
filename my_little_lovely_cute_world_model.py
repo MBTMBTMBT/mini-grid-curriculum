@@ -661,7 +661,7 @@ class TransitionModelVQVAE(TransitionModel):
                 acts_ = F.one_hot(acts, self.action_dim).type(torch.float)
                 pred_idx, reward_pred, done_pred, _, _ = self.idx_forward(idxs, acts_)
                 for i, a, ni, r, d in zip(idxs, acts, pred_idx, reward_pred, done_pred):
-                    graph_dict[i.cpu().item()][a.cpu().item()] = (ni.cpu().item(), r.cpu().item(), d.cpu().item())
+                    graph_dict[i.cpu().item()][a.cpu().item()] = (ni.cpu().item(), r.cpu().item(), d.cpu().item() > 0.5)
 
         return graph_dict
 
@@ -717,8 +717,12 @@ def plot_graph(graph_dict, writer: SummaryWriter, draw_self_loops=False, highlig
     buf.seek(0)
     img = PIL.Image.open(buf)
 
+    # Convert the image to a NumPy array and then to a tensor
+    img_array = np.array(img)  # Convert PIL image to NumPy array
+    img_tensor = torch.tensor(img_array).permute(2, 0, 1) / 255.0  # Scale and permute to match [C, H, W]
+
     # Add image to TensorBoard with the specified tag
-    writer.add_image(tag, torch.tensor(img).permute(2, 0, 1) / 255.0, global_step=0)  # Convert to tensor format expected by TensorBoard
+    writer.add_image(tag, img_tensor, global_step=0)  # Use tag as the name in TensorBoard
 
     # Clean up resources
     buf.close()
@@ -1751,7 +1755,7 @@ def train_world_model_agent():
     lr = 1e-4
     num_parallel = 6
     ensemble_epsilon = 0.1
-    num_embeddings = 32
+    num_embeddings = 128
     commitment_cost = 0.25
     range_target_mean = 0.0
     range_target_std = 1.0

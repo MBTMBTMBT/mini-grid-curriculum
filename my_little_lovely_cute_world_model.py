@@ -701,19 +701,19 @@ def plot_graph(graph_dict, writer: SummaryWriter, draw_self_loops=False, highlig
     pos = nx.spring_layout(G)  # Layout for nodes
 
     # Draw nodes and edges with specified attributes
-    plt.figure(figsize=(15, 15))
+    fig, ax = plt.subplots(figsize=(15, 15))  # Use subplots for more control
     edge_colours = [G[u][v]['colour'] for u, v in G.edges()]  # Use defined edge colours
     nx.draw(G, pos, with_labels=True, node_size=700, font_size=10, font_weight='bold', node_color='skyblue',
-            edge_color=edge_colours)
+            edge_color=edge_colours, ax=ax)
 
     # Optionally add edge labels
     if show_edge_labels:
         edge_labels = nx.get_edge_attributes(G, 'label')
-        nx.draw_networkx_edge_labels(G, pos, edge_labels=edge_labels, font_size=8, label_pos=0.5)
+        nx.draw_networkx_edge_labels(G, pos, edge_labels=edge_labels, font_size=8, label_pos=0.5, ax=ax)
 
     # Render the plot to an in-memory file
     buf = io.BytesIO()
-    plt.savefig(buf, format="png")  # Save figure to the in-memory buffer as PNG
+    plt.savefig(buf, format="png", bbox_inches="tight")  # Use bbox_inches="tight" to ensure no clipping
     buf.seek(0)
     img = PIL.Image.open(buf)
 
@@ -726,7 +726,7 @@ def plot_graph(graph_dict, writer: SummaryWriter, draw_self_loops=False, highlig
 
     # Clean up resources
     buf.close()
-    plt.close()
+    plt.close(fig)  # Only close specific figure
 
 
 class _TransitionModelVQVAEVAE(TransitionModelVAE):
@@ -1745,17 +1745,17 @@ def train_world_model():
 def train_world_model_agent():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    session_dir = r"./experiments/discrete-world_model_agent-door_key"
+    session_dir = r"./experiments/discrete-world_model_agent-empty"
     dataset_samples = 4096
-    dataset_repeat_each_epoch = 25
-    dataset_repeat_times_ensemble = 10
+    dataset_repeat_each_epoch = 1
+    dataset_repeat_times_ensemble = 1
     total_samples = 4096 * 100
     ensemble_num_models = 7
     batch_size = 32
     lr = 1e-4
     num_parallel = 6
-    ensemble_epsilon = 0.1
-    num_embeddings = 128
+    ensemble_epsilon = 0.9
+    num_embeddings = 32
     commitment_cost = 0.25
     range_target_mean = 0.0
     range_target_std = 1.0
@@ -1792,7 +1792,7 @@ def train_world_model_agent():
         config = TaskConfig()
         config.name = f"door_key"
         config.rand_gen_shape = None
-        config.txt_file_path = f"./maps/base_env.txt"
+        config.txt_file_path = f"./maps/empty_base_env.txt"
         config.custom_mission = "reach the goal"
         config.minimum_display_size = 10
         config.display_mode = "random"

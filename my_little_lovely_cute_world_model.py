@@ -636,6 +636,30 @@ class TransitionModelVQVAE(TransitionModel):
 
         return pred_idx, reward_pred, done_pred, vq_loss, vq_loss_dict
 
+    def get_state_action_graph(self, batch_size=16):
+        ideces = [range(self.vector_quantizer.num_embeddings)]
+        # Initialise an empty list to store the batches
+        batched_ideces = []
+        # Iterate through the list with step of batch_size
+        for i in range(0, len(ideces), batch_size):
+            # Slice the list to create a batch
+            batch = ideces[i:i + batch_size]
+            # Convert batch to a torch tensor and reshape to (-1, 1) for shape (x, 1)
+            batch_tensor = torch.tensor(batch, dtype=torch.int).reshape(-1, 1).to(next(self.parameters()).device)
+            batched_ideces.append(batch_tensor)
+
+        graph_dict = {}
+        for i in ideces:
+            graph_dict[i] = {}
+        for idxs in batched_ideces:
+            for act in range(self.action_dim):
+                acts = torch.ones_like(idxs) * act
+                pred_idx, reward_pred, done_pred, _, _ = self.idx_forward(idxs, acts)
+                for i, a, ni, r, d in zip(idxs, acts, pred_idx, reward_pred, done_pred):
+                    graph_dict[i.cpu().item()][a.cpu().item()] = (ni.cpu().item(), r.cpu().item(), d.cpu().item())
+
+        return graph_dict
+
 
 class _TransitionModelVQVAEVAE(TransitionModelVAE):
     def __init__(self, latent_shape, action_dim, conv_arch, num_embeddings=512):

@@ -1626,9 +1626,9 @@ def train_world_model_agent():
     ]
 
     ensemble_transition_model_conv_arch = [
-        (8, 3, 2, 1),
         (16, 3, 2, 1),
         (32, 3, 2, 1),
+        (64, 3, 2, 1),
     ]
 
     configs = []

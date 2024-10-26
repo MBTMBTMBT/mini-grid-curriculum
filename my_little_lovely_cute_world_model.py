@@ -206,6 +206,7 @@ class Encoder(nn.Module):
         target_input_size = calculate_input_size(min(latent_height, latent_width), cnn_net_arch)
         self.resize = T.Resize((target_input_size, target_input_size), antialias=True)
         print(f"The input observations will be resized into {target_input_size} * {target_input_size} for encoding.")
+        self.target_input_size = target_input_size
 
         conv_layers = []
         in_channels = channels
@@ -638,39 +639,41 @@ class SimpleTransitionModel(nn.Module):
         """
         super(SimpleTransitionModel, self).__init__()
         latent_channels, latent_height, latent_width = latent_shape
-
         self.action_dim = action_dim
 
         # Initial convolution to map input (latent + action) to expected channels
         self.initial_conv = nn.Sequential(
-            nn.Conv2d(latent_channels + action_dim, conv_arch[0][0], kernel_size=3, stride=1, padding=1),  # e.g. 19 to 64 channels
+            nn.Conv2d(latent_channels + action_dim, conv_arch[0][0], kernel_size=3, stride=1, padding=1),
+            # e.g., 19 to 64 channels
             nn.LeakyReLU()
         )
 
         # Encoder: Convolutional layers (simplified)
         conv_layers = []
-        in_channels = conv_arch[0][0]  # Start with output from initial_conv (e.g. 64)
+        in_channels = conv_arch[0][0]  # Start with output from initial_conv
         for out_channels, kernel_size, stride, padding in conv_arch:
-            conv_layers.append(nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding))  # Standard Conv layer
-            conv_layers.append(nn.LeakyReLU())  # ReLU activation after each Conv
-            in_channels = out_channels  # Update the number of channels
+            conv_layers.append(nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding))  # Conv layer
+            conv_layers.append(nn.LeakyReLU())  # ReLU activation
+            in_channels = out_channels  # Update in_channels
 
         self.conv_encoder = nn.Sequential(*conv_layers)
 
-        # Decoder: Simplified version to reverse the process
+        # Decoder: Reversed architecture for the deconvolutional layers
         deconv_layers = []
         in_channels = conv_arch[-1][0]  # Start with the encoder's final output channels
         for out_channels, kernel_size, stride, padding in reversed(conv_arch):
-            deconv_layers.append(nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding))  # Conv for decoding
-            deconv_layers.append(nn.LeakyReLU())  # ReLU activation
-            in_channels = out_channels  # Update the number of channels
+            # Adjust padding for ConvTranspose2d to ensure matching output size
+            deconv_layers.append(nn.ConvTranspose2d(in_channels, out_channels, kernel_size, stride, padding,
+                                                    output_padding=(stride - 1)))
+            deconv_layers.append(nn.LeakyReLU())
+            in_channels = out_channels
 
         self.deconv_decoder = nn.Sequential(*deconv_layers)
 
-        # Final convolution to ensure the output matches the latent shape
+        # Final convolution to match the latent space dimensions
         self.final_conv = nn.Conv2d(in_channels, latent_channels, kernel_size=3, stride=1, padding=1)
 
-        # Reward and Done prediction layers (as in the original model)
+        # Reward and Done prediction layers
         self.reward_done_conv = nn.Conv2d(conv_arch[-1][0], conv_arch[-1][0], kernel_size=3, padding=1)
 
         # Shared part for reward and done prediction
@@ -704,7 +707,8 @@ class SimpleTransitionModel(nn.Module):
         batch_size, latent_channels, latent_height, latent_width = latent_state.shape
 
         # Reshape action to match latent state dimensions
-        action_reshaped = action.view(batch_size, self.action_dim, 1, 1).expand(batch_size, self.action_dim, latent_height, latent_width)
+        action_reshaped = action.view(batch_size, self.action_dim, 1, 1).expand(batch_size, self.action_dim,
+                                                                                latent_height, latent_width)
 
         # Concatenate action and latent state
         x = torch.cat([latent_state, action_reshaped], dim=1)
@@ -716,7 +720,7 @@ class SimpleTransitionModel(nn.Module):
         # Process through decoder
         z_next_decoded = self.deconv_decoder(x)
         z_next_decoded = self.final_conv(z_next_decoded)  # Final conv to match latent shape
-        z_next_decoded = F.sigmoid(z_next_decoded)
+        z_next_decoded = torch.sigmoid(z_next_decoded)  # Sigmoid for output range [0, 1]
 
         # Reward and Done prediction
         x = self.reward_done_conv(x)
@@ -1323,7 +1327,7 @@ class WorldModelAgent(WorldModel):
         self.dataloader_ensemble = DataLoader(self.dataset_ensemble, batch_size=batch_size, shuffle=True)
         self.ensemble_model = EnsembleTransitionModel(
             #(num_homomorphism_channels, latent_shape[1], latent_shape[2]),
-            latent_shape,
+            (3, self.encoder.target_input_size, self.encoder.target_input_size),
             num_actions,
             ensemble_net_arch,
             num_models=ensemble_num_models,
@@ -1374,12 +1378,12 @@ class WorldModelAgent(WorldModel):
         device = next(self.parameters()).device
         state = torch.tensor(state)
         state = state.to(device)
-        with torch.no_grad():
+        # with torch.no_grad():
             # Encode the current and next state
-            latent_state = self.encoder(state)
+            # latent_state = self.encoder(state)
             # Make homomorphism state
             # homo_latent_state = latent_state[:, 0:self.num_homomorphism_channels, :, :]
-        return self.ensemble_model.select_action_integers(latent_state, num_actions, temperature)
+        return self.ensemble_model.select_action_integers(state, num_actions, temperature)
 
     def train_epoch(self, dataloader: DataLoader, dataloader_ensemble: DataLoader, log_writer: SummaryWriter, start_num_batches=0,):
         device = next(self.parameters()).device
@@ -1397,12 +1401,12 @@ class WorldModelAgent(WorldModel):
                 rewards = rewards.to(device)
                 next_state = next_obs.to(device)
                 dones = dones.to(device)
-                latent_state, next_latent_state = self.encoder(state), self.encoder(next_state)
+                # latent_state, next_latent_state = self.encoder(state), self.encoder(next_state)
                 # Make homomorphism state
                 # homo_latent_state = latent_state[:, 0:self.num_homomorphism_channels, :, :]
                 # next_homo_latent_state = next_latent_state[:, 0:self.num_homomorphism_channels, :, :]
                 ensemble_loss = self.ensemble_model.compute_minibatch_loss(
-                    latent_state, actions, next_latent_state, rewards, dones, self.mse_loss
+                    state, actions, next_state, rewards, dones, self.mse_loss
                 )
                 self.ensemble_optimizer.zero_grad()
                 ensemble_loss.backward()
@@ -1567,7 +1571,7 @@ def train_world_model_agent():
     session_dir = r"./experiments/discrete-world_model_agent-door_key"
     dataset_samples = 4096
     dataset_repeat_each_epoch = 25
-    dataset_repeat_times_ensemble = 10
+    dataset_repeat_times_ensemble = 5
     total_samples = 4096 * 100
     ensemble_num_models = 16
     batch_size = 32
@@ -1596,6 +1600,12 @@ def train_world_model_agent():
     transition_model_conv_arch = [
         (64, 3, 1, 1),
         (64, 3, 1, 1),
+    ]
+
+    ensemble_transition_model_conv_arch = [
+        (8, 3, 2, 1),
+        (16, 3, 2, 1),
+        (32, 3, 2, 1),
     ]
 
     configs = []
@@ -1638,7 +1648,7 @@ def train_world_model_agent():
         samples_per_epoch = dataset_samples,
         dataset_repeat_times = dataset_repeat_each_epoch,
         ensemble_num_models= ensemble_num_models,
-        ensemble_net_arch = transition_model_conv_arch,
+        ensemble_net_arch = ensemble_transition_model_conv_arch,
         ensemble_lr=lr,
         dataset_repeat_times_ensemble=dataset_repeat_times_ensemble,
         ensemble_epsilon=ensemble_epsilon,

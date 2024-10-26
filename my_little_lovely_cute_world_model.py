@@ -1529,7 +1529,7 @@ class WorldModelAgent(WorldModel):
             checkpoint = torch.load(checkpoint_path)
             self.load_state_dict(checkpoint['model_state_dict'])
             self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-            self.ensemble_optimizer = checkpoint['ensemble_optimizer']
+            self.ensemble_optimize.load_state_dict(checkpoint['ensemble_optimizer'])
             self.trained_samples = checkpoint['trained_samples']
             epoch = checkpoint['epoch']
             loss = checkpoint['loss']

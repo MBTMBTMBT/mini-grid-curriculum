@@ -1078,12 +1078,18 @@ class EnsembleTransitionModel(nn.Module):
         self.total_reward_uncertainty = 0.0
         self.total_done_uncertainty = 0.0
         self.uncertainty_computation_count = 0
+        self.count_actions = {}
+        for i in range(self.num_actions):
+            self.count_actions[i] = 0
 
     def reset_uncertainty(self):
         self.total_state_uncertainty = 0.0
         self.total_reward_uncertainty = 0.0
         self.total_done_uncertainty = 0.0
         self.uncertainty_computation_count = 0
+        self.count_actions = {}
+        for i in range(self.num_actions):
+            self.count_actions[i] = 0
 
     def compute_minibatch_loss(self, latent_state, action, next_latent_state, reward, done, loss_fn):
         """
@@ -1232,6 +1238,9 @@ class EnsembleTransitionModel(nn.Module):
 
         # Convert each selected one-hot action back to its corresponding integer index
         selected_action_indices = [np.argmax(action) for action in selected_actions]
+
+        for action in selected_action_indices:
+            self.count_actions[action] += 1
 
         return selected_action_indices
 
@@ -1466,6 +1475,7 @@ class WorldModelAgent(WorldModel):
             )
             # sample dataset
             self.dataset.resample(env, self._select_action_integers, temperature=1.0)
+            print("Action selected:", self.ensemble_model.count_actions)
             self.dataset_ensemble.data = self.dataset.data
             self.sample_counter += self.dataset.data_size
             avg_state_uncertainty = self.ensemble_model.total_state_uncertainty / self.ensemble_model.uncertainty_computation_count

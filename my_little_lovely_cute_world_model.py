@@ -535,6 +535,17 @@ class VectorQuantizer(nn.Module):
         self.embedding = nn.Parameter(torch.cat([self.embedding, new_embedding_weights], dim=0))
         self.num_embeddings += new_embeddings  # Update embedding count
 
+    def get_batch_encodings(self, indices):
+        """
+        Retrieve the embeddings for a batch of indices from the codebook.
+        :param indices: Batch of indices to fetch embeddings for.
+        :return: Tensor containing the embeddings for the specified indices.
+        """
+        # Ensure indices are in the proper shape for embedding lookup
+        indices = indices.view(-1)  # Flatten indices to (batch_size,)
+        batch_embeddings = F.embedding(indices, self.embedding)
+        return batch_embeddings
+
 
 class TransitionModelVQVAE(TransitionModel):
     def __init__(
@@ -595,6 +606,35 @@ class TransitionModelVQVAE(TransitionModel):
         done_pred = self.done_predictor(x)
 
         return z_quantized, reward_pred, done_pred, vq_loss, vq_loss_dict
+
+    def idx_forward(self, idx, action):
+        with torch.no_grad():
+            latent_state = self.vector_quantizer.get_batch_encodings(idx)
+            batch_size, latent_channels, latent_height, latent_width = latent_state.shape
+
+            # Reshape action to match latent state dimensions
+            action_reshaped = action.view(batch_size, self.action_dim, 1, 1).expand(batch_size, self.action_dim,
+                                                                                    latent_height, latent_width)
+            x = torch.cat([latent_state, action_reshaped], dim=1)
+
+            # Process through encoder
+            x = self.initial_conv(x)
+            x = self.conv_encoder(x)
+
+            # Process through decoder
+            z_next_decoded = self.deconv_decoder(x)
+
+            # Apply vector quantization on the output of decoder
+            z_quantized, pred_idx, vq_loss, vq_loss_dict = self.vector_quantizer(z_next_decoded)
+
+            # # Apply Sigmoid to limit the output range between [0, 1]
+            # z_quantized = torch.sigmoid(z_quantized)
+
+            # Reward and done predictions
+            reward_pred = self.reward_predictor(x)
+            done_pred = self.done_predictor(x)
+
+        return pred_idx, reward_pred, done_pred, vq_loss, vq_loss_dict
 
 
 class _TransitionModelVQVAEVAE(TransitionModelVAE):
@@ -1451,7 +1491,7 @@ class WorldModelAgent(WorldModel):
                 log_writer.add_scalar(f'ensemble_loss', ensemble_loss, i + start_num_batches)
         return _avg_loss, _start_num_batches
 
-    def train_session(self, env: VecEnv, session_dir: str, total_collected_samples: int):
+    def train_session(self, env: VecEnv, session_dir: str, total_collected_samples: int, temperature: float):
         log_dir = os.path.join(session_dir, "logs")
         os.makedirs(log_dir, exist_ok=True)
         log_writer = SummaryWriter(log_dir=log_dir)
@@ -1474,7 +1514,7 @@ class WorldModelAgent(WorldModel):
                 f"Resampling dataset samples: {self.sample_counter}+{self.dataset.data_size} / {total_collected_samples}..."
             )
             # sample dataset
-            self.dataset.resample(env, self._select_action_integers, temperature=1.0)
+            self.dataset.resample(env, self._select_action_integers, temperature=temperature)
             print("Action selected:", self.ensemble_model.count_actions)
             self.dataset_ensemble.data = self.dataset.data
             self.sample_counter += self.dataset.data_size
@@ -1606,7 +1646,7 @@ def train_world_model_agent():
     dataset_repeat_each_epoch = 25
     dataset_repeat_times_ensemble = 10
     total_samples = 4096 * 100
-    ensemble_num_models = 16
+    ensemble_num_models = 7
     batch_size = 32
     lr = 1e-4
     num_parallel = 6
@@ -1618,6 +1658,7 @@ def train_world_model_agent():
     range_loss_weight = 0.1
     uniformity_weight = 0.1
     uniformity_batch_size = 32
+    temperature = 0.5
 
     latent_shape = (8, 24, 24)  # channel, height, width
     num_homomorphism_channels = 5
@@ -1695,7 +1736,7 @@ def train_world_model_agent():
         uniformity_batch_size=uniformity_batch_size,
     ).to(device)
 
-    world_model.train_session(venv, session_dir, total_samples)
+    world_model.train_session(venv, session_dir, total_samples, temperature)
 
 
 if __name__ == '__main__':

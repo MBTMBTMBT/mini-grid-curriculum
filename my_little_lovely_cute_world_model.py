@@ -1,5 +1,6 @@
 import io
 import os
+import random
 from typing import Tuple, List, Optional, Any
 
 import numpy as np
@@ -1086,7 +1087,7 @@ class EnsembleTransitionModel(nn.Module):
 
     def compute_minibatch_loss(self, latent_state, action, next_latent_state, reward, done, loss_fn):
         """
-        Train all models in the ensemble on the provided data.
+        Train a randomly selected subset of models in the ensemble on the provided data.
         :param latent_state: Current latent state (batch_size, latent_channels, latent_height, latent_width)
         :param action: Actions taken (batch_size, action_dim)
         :param next_latent_state: True next latent state (batch_size, latent_channels, latent_height, latent_width)
@@ -1099,24 +1100,31 @@ class EnsembleTransitionModel(nn.Module):
         action = action.to(device)
         reward = reward.to(device)
         next_latent_state = next_latent_state.to(device)
-        done = done.to(device)
+        done = done.float().to(device)
 
+        # One-hot encode the action
         action = F.one_hot(action, self.num_actions).type(torch.float)
 
-        total_loss = torch.tensor(0.0).to(device)
-        for model in self.models:
-            # Forward pass
+        # Convert self.models to a list for random sampling
+        models_list = list(self.models)
+        num_models_to_use = random.randint(1, len(models_list))  # Randomly choose 1 to total models
+        selected_models = random.sample(models_list, num_models_to_use)
+
+        total_loss = torch.tensor(0.0, device=device)
+        for model in selected_models:
+            # Forward pass through the selected model
             z_next_pred, reward_pred, done_pred = model(latent_state, action)
 
             # Compute losses: next state prediction loss, reward prediction loss, done prediction loss
             state_loss = loss_fn(z_next_pred, next_latent_state)
             reward_loss = loss_fn(reward_pred.squeeze(), reward)
-            done_loss = F.binary_cross_entropy(done_pred.squeeze(), done.float())
+            done_loss = F.binary_cross_entropy(done_pred.squeeze(), done)
 
-            # Total loss
+            # Accumulate loss
             total_loss += state_loss + reward_loss + done_loss
 
-        return total_loss / self.num_models
+        # Average the loss over the number of selected models
+        return total_loss / num_models_to_use
 
     def compute_uncertainty(self, latent_states, actions):
         """
@@ -1586,7 +1594,7 @@ def train_world_model_agent():
     session_dir = r"./experiments/discrete-world_model_agent-door_key"
     dataset_samples = 4096
     dataset_repeat_each_epoch = 25
-    dataset_repeat_times_ensemble = 5
+    dataset_repeat_times_ensemble = 15
     total_samples = 4096 * 100
     ensemble_num_models = 16
     batch_size = 32

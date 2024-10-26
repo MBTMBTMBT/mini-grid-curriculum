@@ -1555,6 +1555,10 @@ class WorldModelAgent(WorldModel):
             # train on epoch
             loss, _ = self.train_epoch(self.dataloader, self.dataloader_ensemble, log_writer, start_num_batches=epoch * len(self.dataloader))
 
+            graph_dict = self.transition_model.get_state_action_graph()
+            print("State-Action graph:")
+            print(graph_dict)
+
             if loss < min_loss:
                 min_loss = loss
                 self.save_model(epoch, loss, is_best=True, save_dir=os.path.join(session_dir, 'models'))
@@ -1674,7 +1678,7 @@ def train_world_model_agent():
     batch_size = 32
     lr = 1e-4
     num_parallel = 6
-    ensemble_epsilon = 0.2
+    ensemble_epsilon = 0.1
     num_embeddings = 128
     commitment_cost = 0.25
     range_target_mean = 0.0

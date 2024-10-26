@@ -1438,7 +1438,7 @@ class WorldModelAgent(WorldModel):
                 # homo_latent_state = latent_state[:, 0:self.num_homomorphism_channels, :, :]
                 # next_homo_latent_state = next_latent_state[:, 0:self.num_homomorphism_channels, :, :]
                 ensemble_loss = self.ensemble_model.compute_minibatch_loss(
-                    state, actions, next_state, rewards, dones, self.mse_loss
+                    state, actions, next_state, rewards, dones, self.mbt_loss
                 )
                 self.ensemble_optimizer.zero_grad()
                 ensemble_loss.backward()

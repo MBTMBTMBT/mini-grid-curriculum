@@ -440,9 +440,9 @@ def compute_uniformity_loss(embedding, batch_size=None):
 
 class VectorQuantizer(nn.Module):
     def __init__(self, num_embeddings, embedding_dim, commitment_cost=0.25, range_target_mean=0.0,
-                 range_target_std=1.0, range_loss_weight=0.1, uniformity_weight=0.1, uniformity_batch_size=64):
+                 range_target_std=1.0, range_loss_weight=0.1, uniformity_weight=0.1, uniformity_batch_size=64, noise_std=0.1):
         """
-        Vector Quantizer with dynamic expansion, commitment, range, and uniformity losses.
+        Vector Quantizer with dynamic expansion, commitment, range, uniformity losses, and stochastic quantization.
 
         :param num_embeddings: Initial number of vectors in the codebook.
         :param embedding_dim: Dimensionality of each embedding vector.
@@ -452,6 +452,7 @@ class VectorQuantizer(nn.Module):
         :param range_loss_weight: Weight for the range loss.
         :param uniformity_weight: Weight for the uniformity loss.
         :param uniformity_batch_size: Number of embeddings to sample for uniformity loss.
+        :param noise_std: Standard deviation for random noise added in quantization.
         """
         super(VectorQuantizer, self).__init__()
         self.num_embeddings = num_embeddings
@@ -462,6 +463,7 @@ class VectorQuantizer(nn.Module):
         self.range_loss_weight = range_loss_weight
         self.uniformity_weight = uniformity_weight
         self.uniformity_batch_size = uniformity_batch_size
+        self.noise_std = noise_std
 
         # Initialize embeddings with normal distribution
         self.embedding = nn.Parameter(torch.randn(num_embeddings, int(np.prod(self.embedding_dim))))
@@ -470,10 +472,13 @@ class VectorQuantizer(nn.Module):
         # Flatten inputs except the last dimension
         flat_inputs = inputs.view(inputs.size(0), -1)
 
-        # Compute L2 distances between input vectors and embeddings
-        distances = torch.sum(flat_inputs ** 2, dim=1, keepdim=True) + \
+        # Add Gaussian noise to introduce randomness in quantization
+        noisy_inputs = flat_inputs + torch.randn_like(flat_inputs) * self.noise_std
+
+        # Compute L2 distances between noisy input vectors and embeddings
+        distances = torch.sum(noisy_inputs ** 2, dim=1, keepdim=True) + \
                     torch.sum(self.embedding ** 2, dim=1) - \
-                    2 * torch.matmul(flat_inputs, self.embedding.t())
+                    2 * torch.matmul(noisy_inputs, self.embedding.t())
 
         # Get the closest embedding index
         encoding_indices = torch.argmin(distances, dim=1).unsqueeze(1)
@@ -483,7 +488,7 @@ class VectorQuantizer(nn.Module):
 
         # Standard VQ-VAE losses
         embedding_loss = F.mse_loss(quantized.detach(), inputs)
-        commitment_loss = F.mse_loss(inputs.detach(), quantized)
+        commitment_loss = self.commitment_cost * F.mse_loss(inputs.detach(), quantized)
 
         # Smooth range loss to encourage values within target distribution range
         range_loss = compute_smooth_range_loss(
@@ -498,12 +503,12 @@ class VectorQuantizer(nn.Module):
         # Total loss
         total_loss = (
                 embedding_loss +
-                self.commitment_cost * commitment_loss +
+                commitment_loss +
                 self.range_loss_weight * range_loss +
                 self.uniformity_weight * uniformity_loss
         )
 
-        # Straight-through estimator for quantization
+        # Straight-through estimator for quantization with noisy input for stochasticity
         quantized = inputs + (quantized - inputs).detach()
 
         loss_dict = {
@@ -1746,7 +1751,7 @@ def train_world_model_agent():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     session_dir = r"./experiments/discrete-world_model_agent-empty"
-    dataset_samples = 4096
+    dataset_samples = 512
     dataset_repeat_each_epoch = 1
     dataset_repeat_times_ensemble = 1
     total_samples = 4096 * 100
@@ -1756,7 +1761,7 @@ def train_world_model_agent():
     num_parallel = 6
     ensemble_epsilon = 0.9
     num_embeddings = 32
-    commitment_cost = 0.25
+    commitment_cost = 0.1
     range_target_mean = 0.0
     range_target_std = 1.0
     range_loss_weight = 0.1

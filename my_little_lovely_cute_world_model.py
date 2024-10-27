@@ -12,14 +12,12 @@ import torch.optim as optim
 from PIL import Image
 import torch.nn.functional as F
 import torchvision.transforms as T
-from jedi.inference.gradual.typing import Callable
 from matplotlib import pyplot as plt
 from stable_baselines3.common.vec_env import SubprocVecEnv, VecEnv
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
-from torchvision.models import vgg16
-from piq import ssim
+from vector_quantize_pytorch import ResidualVQ
 
 from customize_minigrid.wrappers import FullyObsImageWrapper
 from gymnasium_dataset import GymDataset
@@ -416,144 +414,6 @@ class TransitionModelVAE(TransitionModel):
         return z_next_decoded, mean, logvar, reward_pred, done_pred
 
 
-def compute_smooth_range_loss(embedding, target_mean=0.0, target_std=1.0):
-    """ Encourage embeddings to follow a normal distribution with target mean and std. """
-    mean_loss = torch.mean((embedding.mean(dim=0) - target_mean) ** 2)
-    std_loss = torch.mean((embedding.std(dim=0) - target_std) ** 2)
-    return mean_loss + std_loss
-
-
-def compute_uniformity_loss(embedding, batch_size=None):
-    """ Calculate uniformity loss based on cosine similarity, optionally using batch sampling. """
-    if batch_size is None or batch_size >= embedding.size(0):
-        embedding_norm = F.normalize(embedding, p=2, dim=1)
-        similarity = torch.matmul(embedding_norm, embedding_norm.T)
-        uniformity_loss = torch.mean((similarity - torch.eye(embedding.size(0), device=similarity.device)) ** 2)
-    else:
-        indices = torch.randint(0, embedding.size(0), (batch_size,), device=embedding.device)
-        sampled_embeddings = embedding[indices]
-        embedding_norm = F.normalize(sampled_embeddings, p=2, dim=1)
-        similarity = torch.matmul(embedding_norm, embedding_norm.T)
-        uniformity_loss = torch.mean((similarity - torch.eye(batch_size, device=similarity.device)) ** 2)
-    return uniformity_loss
-
-
-class VectorQuantizer(nn.Module):
-    def __init__(self, num_embeddings, embedding_dim, commitment_cost=0.25, range_target_mean=0.0,
-                 range_target_std=1.0, range_loss_weight=0.1, uniformity_weight=0.1, uniformity_batch_size=64, noise_std=0.1):
-        """
-        Vector Quantizer with dynamic expansion, commitment, range, uniformity losses, and stochastic quantization.
-
-        :param num_embeddings: Initial number of vectors in the codebook.
-        :param embedding_dim: Dimensionality of each embedding vector.
-        :param commitment_cost: Weight for the commitment loss.
-        :param range_target_mean: Target mean for embedding elements (used for range loss).
-        :param range_target_std: Target std for embedding elements (used for range loss).
-        :param range_loss_weight: Weight for the range loss.
-        :param uniformity_weight: Weight for the uniformity loss.
-        :param uniformity_batch_size: Number of embeddings to sample for uniformity loss.
-        :param noise_std: Standard deviation for random noise added in quantization.
-        """
-        super(VectorQuantizer, self).__init__()
-        self.num_embeddings = num_embeddings
-        self.embedding_dim = embedding_dim
-        self.commitment_cost = commitment_cost
-        self.range_target_mean = range_target_mean
-        self.range_target_std = range_target_std
-        self.range_loss_weight = range_loss_weight
-        self.uniformity_weight = uniformity_weight
-        self.uniformity_batch_size = uniformity_batch_size
-        self.noise_std = noise_std
-
-        # Initialize embeddings with normal distribution
-        self.embedding = nn.Parameter(torch.randn(num_embeddings, int(np.prod(self.embedding_dim))))
-
-    def forward(self, inputs):
-        # Flatten inputs except the last dimension
-        flat_inputs = inputs.view(inputs.size(0), -1)
-
-        # Add Gaussian noise to introduce randomness in quantization
-        noisy_inputs = flat_inputs + torch.randn_like(flat_inputs) * self.noise_std
-
-        # Compute L2 distances between noisy input vectors and embeddings
-        distances = torch.sum(noisy_inputs ** 2, dim=1, keepdim=True) + \
-                    torch.sum(self.embedding ** 2, dim=1) - \
-                    2 * torch.matmul(noisy_inputs, self.embedding.t())
-
-        # Get the closest embedding index
-        encoding_indices = torch.argmin(distances, dim=1).unsqueeze(1)
-
-        # Quantize by replacing with closest embedding
-        quantized = F.embedding(encoding_indices, self.embedding).view_as(inputs)
-
-        # Standard VQ-VAE losses
-        embedding_loss = F.mse_loss(quantized.detach(), inputs)
-        commitment_loss = self.commitment_cost * F.mse_loss(inputs.detach(), quantized)
-
-        # Smooth range loss to encourage values within target distribution range
-        range_loss = compute_smooth_range_loss(
-            self.embedding, target_mean=self.range_target_mean, target_std=self.range_target_std
-        )
-
-        # Uniformity loss (using batch sampling for computational efficiency)
-        uniformity_loss = compute_uniformity_loss(
-            self.embedding, batch_size=self.uniformity_batch_size
-        )
-
-        # Total loss
-        total_loss = (
-                embedding_loss +
-                commitment_loss +
-                self.range_loss_weight * range_loss +
-                self.uniformity_weight * uniformity_loss
-        )
-
-        # Straight-through estimator for quantization with noisy input for stochasticity
-        quantized = inputs + (quantized - inputs).detach()
-
-        loss_dict = {
-            "embedding_loss": embedding_loss.detach().cpu().item(),
-            "commitment_loss": commitment_loss.detach().cpu().item(),
-            "range_loss": range_loss.detach().cpu().item(),
-            "uniformity_loss": uniformity_loss.detach().cpu().item(),
-        }
-
-        return quantized, encoding_indices, total_loss, loss_dict
-
-    def expand_codebook(self, new_embeddings, distribution="normal"):
-        """
-        Expand the embedding table with new embeddings initialized to match range target distribution.
-        :param new_embeddings: Number of new embeddings to add.
-        :param distribution: Distribution for initializing new embeddings to match range target.
-        """
-        flattened_embedding_dim = int(np.prod(self.embedding_dim))
-        if distribution == "normal":
-            # Initialize with normal distribution
-            new_embedding_weights = torch.randn(new_embeddings, flattened_embedding_dim).to(
-                self.embedding.device) * self.range_target_std + self.range_target_mean
-        elif distribution == "uniform":
-            # Initialize with uniform distribution within [-1, 1]
-            new_embedding_weights = (torch.rand(new_embeddings, flattened_embedding_dim) * 2 - 1).to(
-                self.embedding.device)
-        else:
-            raise ValueError(f"Unknown distribution '{distribution}'")
-
-        # Append new embeddings to the existing embedding matrix
-        self.embedding = nn.Parameter(torch.cat([self.embedding, new_embedding_weights], dim=0))
-        self.num_embeddings += new_embeddings  # Update embedding count
-
-    def get_batch_encodings(self, indices):
-        """
-        Retrieve the embeddings for a batch of indices from the codebook.
-        :param indices: Batch of indices to fetch embeddings for.
-        :return: Tensor containing the embeddings for the specified indices.
-        """
-        # Ensure indices are in the proper shape for embedding lookup
-        indices = indices.view(-1)  # Flatten indices to (batch_size,)
-        batch_embeddings = F.embedding(indices, self.embedding)
-        return batch_embeddings
-
-
 class TransitionModelVQVAE(TransitionModel):
     def __init__(
             self,
@@ -561,6 +421,7 @@ class TransitionModelVQVAE(TransitionModel):
             action_dim,
             conv_arch,
             num_embeddings=128,
+            num_quantizers=1,
             commitment_cost=0.25,
             range_target_mean=0.0,
             range_target_std=1.0,
@@ -571,30 +432,41 @@ class TransitionModelVQVAE(TransitionModel):
         super(TransitionModelVQVAE, self).__init__(latent_shape, action_dim, conv_arch)
         # embedding_dim = latent_shape[0]  # embedding_dim based on the output channels of decoder
         self.latent_shape = latent_shape
+        self.latent_dim = latent_shape[0] * latent_shape[1] * latent_shape[2]
 
         # Vector quantizer
-        self.vector_quantizer = VectorQuantizer(
-            num_embeddings,
-            latent_shape,
-            commitment_cost,
-            range_target_mean,
-            range_target_std,
-            range_loss_weight,
-            uniformity_weight,
-            uniformity_batch_size,
+        self.vector_quantizer = ResidualVQ(
+            dim=self.latent_dim,
+            codebook_size=num_embeddings,
+            codebook_dim=self.latent_dim,
+            num_quantizers=num_quantizers,
+            shared_codebook=False,
+            quantize_dropout=False,
+            accept_image_fmap=False,
+            # implicit_neural_codebook=True,
+            # mlp_kwargs={'depth': 3, 'l2norm_output': True},
+            commitment_weight=commitment_cost,
+            kmeans_init=True,
+            rotation_trick=True,
+            orthogonal_reg_weight=10,
+            # orthogonal_reg_max_codes=64,
+            orthogonal_reg_active_codes_only=False,
         )
 
     def forward(self, latent_state, action):
         batch_size, latent_channels, latent_height, latent_width = latent_state.shape
 
         # Quantization at the beginning (without grad)
-        with torch.no_grad():
-            latent_state_quantized, _, _, _ = self.vector_quantizer(latent_state)
+        # with torch.no_grad():
+            # latent_state_flattened = latent_state.view(batch_size, -1)  # form [batch, channels * height * width]
+            # latent_state_quantized, _, _ = self.vector_quantizer(latent_state_flattened)
+            # latent_state_quantized = latent_state_quantized.view(batch_size, latent_channels, latent_height,
+            #                                                      latent_width)
 
         # Reshape action to match latent state dimensions
         action_reshaped = action.view(batch_size, self.action_dim, 1, 1).expand(batch_size, self.action_dim,
                                                                                 latent_height, latent_width)
-        x = torch.cat([latent_state_quantized, action_reshaped], dim=1)
+        x = torch.cat([latent_state, action_reshaped], dim=1)
 
         # Process through encoder
         x = self.initial_conv(x)
@@ -604,7 +476,9 @@ class TransitionModelVQVAE(TransitionModel):
         z_next_decoded = self.deconv_decoder(x)
 
         # Apply vector quantization on the output of decoder
-        z_quantized, _, vq_loss, vq_loss_dict = self.vector_quantizer(z_next_decoded)
+        z_next_decoded_flattened = z_next_decoded.view(batch_size, -1)
+        z_quantized, _, vq_loss = self.vector_quantizer(z_next_decoded_flattened)
+        z_quantized = z_quantized.view(batch_size, latent_channels, latent_height, latent_width)
 
         # # Apply Sigmoid to limit the output range between [0, 1]
         # z_quantized = torch.sigmoid(z_quantized)
@@ -613,13 +487,16 @@ class TransitionModelVQVAE(TransitionModel):
         reward_pred = self.reward_predictor(x)
         done_pred = self.done_predictor(x)
 
-        return z_quantized, reward_pred, done_pred, vq_loss, vq_loss_dict
+        vq_loss = vq_loss.sum()
+
+        return z_quantized, reward_pred, done_pred, vq_loss
 
     def idx_forward(self, idx, action):
         with torch.no_grad():
-            latent_state = self.vector_quantizer.get_batch_encodings(idx)
+            latent_state = self.vector_quantizer.get_output_from_indices(idx)
             batch_size = latent_state.shape[0]
             latent_channels, latent_height, latent_width = self.latent_shape
+            latent_state = latent_state.view(batch_size, latent_channels, latent_height, latent_width)
 
             # Reshape action to match latent state dimensions
             action_reshaped = action.view(batch_size, self.action_dim, 1, 1).expand(batch_size, self.action_dim,
@@ -634,7 +511,8 @@ class TransitionModelVQVAE(TransitionModel):
             z_next_decoded = self.deconv_decoder(x)
 
             # Apply vector quantization on the output of decoder
-            z_quantized, pred_idx, vq_loss, vq_loss_dict = self.vector_quantizer(z_next_decoded)
+            z_next_decoded_flattened = z_next_decoded.view(batch_size, -1)
+            z_quantized, pred_idx, vq_loss = self.vector_quantizer(z_next_decoded_flattened)
 
             # # Apply Sigmoid to limit the output range between [0, 1]
             # z_quantized = torch.sigmoid(z_quantized)
@@ -643,10 +521,12 @@ class TransitionModelVQVAE(TransitionModel):
             reward_pred = self.reward_predictor(x)
             done_pred = self.done_predictor(x)
 
-        return pred_idx, reward_pred, done_pred, vq_loss, vq_loss_dict
+            vq_loss = vq_loss.sum()
+
+        return pred_idx, reward_pred, done_pred, vq_loss
 
     def get_state_action_graph(self, batch_size=16):
-        ideces = [i for i in range(self.vector_quantizer.num_embeddings)]
+        ideces = [i for i in range(self.vector_quantizer.codebook_size)]
         # Initialise an empty list to store the batches
         batched_ideces = []
         # Iterate through the list with step of batch_size
@@ -664,7 +544,7 @@ class TransitionModelVQVAE(TransitionModel):
             for act in range(self.action_dim):
                 acts = (torch.ones_like(idxs) * act).squeeze().long()
                 acts_ = F.one_hot(acts, self.action_dim).type(torch.float)
-                pred_idx, reward_pred, done_pred, _, _ = self.idx_forward(idxs, acts_)
+                pred_idx, reward_pred, done_pred, _ = self.idx_forward(idxs, acts_)
                 for i, a, ni, r, d in zip(idxs, acts, pred_idx, reward_pred, done_pred):
                     graph_dict[i.cpu().item()][a.cpu().item()] = (ni.cpu().item(), r.cpu().item(), d.cpu().item() > 0.5)
 
@@ -891,7 +771,7 @@ class WorldModel(nn.Module):
             transition_model_conv_arch: List[Tuple[int, int, int, int]],
             lr: float = 1e-4,
             num_embeddings=128,
-            commitment_cost=0.25,
+            commitment_cost=2.0,
             range_target_mean=0.0,
             range_target_std=1.0,
             range_loss_weight=0.1,
@@ -948,7 +828,7 @@ class WorldModel(nn.Module):
         action = F.one_hot(action, self.num_actions).type(torch.float)
         # predicted_next_homo_latent_state, mean, logvar, predicted_reward, predicted_done \
         #     = self.transition_model(homo_latent_state, action)
-        predicted_next_homo_latent_state, predicted_reward, predicted_done, _, _ \
+        predicted_next_homo_latent_state, predicted_reward, predicted_done, _ \
             = self.transition_model(homo_latent_state, action)
 
         # Make homomorphism next state
@@ -1025,7 +905,7 @@ class WorldModel(nn.Module):
         action = F.one_hot(action, self.num_actions).type(torch.float)
         # predicted_next_homo_latent_state, mean, logvar, predicted_reward, predicted_done \
         #     = self.transition_model(homo_latent_state, action)
-        predicted_next_homo_latent_state, predicted_reward, predicted_done, vq_loss, vq_loss_dict \
+        predicted_next_homo_latent_state, predicted_reward, predicted_done, vq_loss \
             = self.transition_model(homo_latent_state, action)
 
         # Make homomorphism next state
@@ -1098,8 +978,8 @@ class WorldModel(nn.Module):
             "total_loss": total_loss.detach().cpu().item(),
         }
 
-        for k in vq_loss_dict.keys():
-            loss_dict[k] = vq_loss_dict[k]
+        # for k in vq_loss_dict.keys():
+        #     loss_dict[k] = vq_loss_dict[k]
 
         return loss_dict
 
@@ -1534,7 +1414,7 @@ class WorldModelAgent(WorldModel):
             checkpoint = torch.load(checkpoint_path)
             self.load_state_dict(checkpoint['model_state_dict'])
             self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-            self.ensemble_optimize.load_state_dict(checkpoint['ensemble_optimizer'])
+            self.ensemble_optimizer.load_state_dict(checkpoint['ensemble_optimizer'])
             self.trained_samples = checkpoint['trained_samples']
             epoch = checkpoint['epoch']
             loss = checkpoint['loss']
@@ -1761,7 +1641,7 @@ def train_world_model_agent():
     num_parallel = 6
     ensemble_epsilon = 0.9
     num_embeddings = 32
-    commitment_cost = 0.1
+    commitment_cost = 2.0
     range_target_mean = 0.0
     range_target_std = 1.0
     range_loss_weight = 0.1

@@ -448,9 +448,9 @@ class TransitionModelVQVAE(TransitionModel):
             commitment_weight=commitment_cost,
             kmeans_init=True,
             rotation_trick=True,
-            orthogonal_reg_weight=10,
+            # orthogonal_reg_weight=10,
             # orthogonal_reg_max_codes=64,
-            orthogonal_reg_active_codes_only=False,
+            # orthogonal_reg_active_codes_only=False,
         )
 
     def forward(self, latent_state, action):
@@ -458,10 +458,10 @@ class TransitionModelVQVAE(TransitionModel):
 
         # Quantization at the beginning (without grad)
         # with torch.no_grad():
-            # latent_state_flattened = latent_state.view(batch_size, -1)  # form [batch, channels * height * width]
-            # latent_state_quantized, _, _ = self.vector_quantizer(latent_state_flattened)
-            # latent_state_quantized = latent_state_quantized.view(batch_size, latent_channels, latent_height,
-            #                                                      latent_width)
+        #     latent_state_flattened = latent_state.view(batch_size, -1)  # form [batch, channels * height * width]
+        #     latent_state_quantized, _, _ = self.vector_quantizer(latent_state_flattened)
+        #     latent_state_quantized = latent_state_quantized.view(batch_size, latent_channels, latent_height,
+        #                                                          latent_width)
 
         # Reshape action to match latent state dimensions
         action_reshaped = action.view(batch_size, self.action_dim, 1, 1).expand(batch_size, self.action_dim,
@@ -575,7 +575,7 @@ def plot_graph(graph_dict, writer: SummaryWriter, draw_self_loops=False, highlig
                 continue
 
             # Create edge label if show_edge_labels is True
-            edge_label = f"action: {action}, reward: {reward}, done: {done}" if show_edge_labels else None
+            edge_label = f"action: {action}, reward: {reward: .2f}, done: {done}" if show_edge_labels else None
             # Set edge colour based on highlight_done parameter
             edge_colour = 'red' if highlight_done and done else 'grey'
 
@@ -1335,6 +1335,7 @@ class WorldModelAgent(WorldModel):
             lr: float = 1e-4,
             samples_per_epoch: int = 4096,
             dataset_repeat_times: int = 10,
+            movement_augmentation: int = 0,
             ensemble_num_models: int = 4,
             ensemble_net_arch: List[Tuple[int, int, int, int]] = None,
             ensemble_lr: float = 1e-4,
@@ -1370,8 +1371,8 @@ class WorldModelAgent(WorldModel):
             uniformity_weight=uniformity_weight,
             uniformity_batch_size=uniformity_batch_size,
         )
-        self.dataset = WorldModelAgentDataset(samples_per_epoch, dataset_repeat_times)
-        self.dataset_ensemble = WorldModelAgentDataset(samples_per_epoch, dataset_repeat_times_ensemble)
+        self.dataset = WorldModelAgentDataset(samples_per_epoch, dataset_repeat_times, movement_augmentation=movement_augmentation)
+        self.dataset_ensemble = WorldModelAgentDataset(samples_per_epoch, dataset_repeat_times_ensemble, movement_augmentation=movement_augmentation)
         self.dataloader = DataLoader(self.dataset, batch_size=batch_size, shuffle=True)
         self.dataloader_ensemble = DataLoader(self.dataset_ensemble, batch_size=batch_size, shuffle=True)
         self.ensemble_model = EnsembleTransitionModel(
@@ -1516,7 +1517,7 @@ class WorldModelAgent(WorldModel):
                 writer=log_writer,
                 draw_self_loops=False,
                 highlight_done=True,
-                show_edge_labels=False,
+                show_edge_labels=True,
                 tag=f'{epoch}-graph',
             )
 
@@ -1631,8 +1632,8 @@ def train_world_model_agent():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     session_dir = r"./experiments/discrete-world_model_agent-empty"
-    dataset_samples = 512
-    dataset_repeat_each_epoch = 1
+    dataset_samples = 1024
+    dataset_repeat_each_epoch = 10
     dataset_repeat_times_ensemble = 1
     total_samples = 4096 * 100
     ensemble_num_models = 7
@@ -1640,7 +1641,7 @@ def train_world_model_agent():
     lr = 1e-4
     num_parallel = 6
     ensemble_epsilon = 0.9
-    num_embeddings = 32
+    num_embeddings = 14
     commitment_cost = 2.0
     range_target_mean = 0.0
     range_target_std = 1.0
@@ -1650,7 +1651,7 @@ def train_world_model_agent():
     temperature = 0.5
 
     latent_shape = (8, 24, 24)  # channel, height, width
-    num_homomorphism_channels = 5
+    num_homomorphism_channels = 8
 
     movement_augmentation = 6
 
@@ -1677,12 +1678,12 @@ def train_world_model_agent():
         config = TaskConfig()
         config.name = f"door_key"
         config.rand_gen_shape = None
-        config.txt_file_path = f"./maps/empty_base_env.txt"
+        config.txt_file_path = f"./maps/empty_small.txt"
         config.custom_mission = "reach the goal"
-        config.minimum_display_size = 10
+        config.minimum_display_size = 4
         config.display_mode = "random"
-        config.random_rotate = True
-        config.random_flip = True
+        config.random_rotate = False
+        config.random_flip = False
         config.max_steps = 1024
         # config.start_pos = (5, 5)
         config.train_total_steps = 2.5e7
@@ -1710,6 +1711,7 @@ def train_world_model_agent():
         lr=lr,
         samples_per_epoch = dataset_samples,
         dataset_repeat_times = dataset_repeat_each_epoch,
+        movement_augmentation = movement_augmentation,
         ensemble_num_models= ensemble_num_models,
         ensemble_net_arch = ensemble_transition_model_conv_arch,
         ensemble_lr=lr,

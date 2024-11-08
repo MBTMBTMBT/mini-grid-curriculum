@@ -13,6 +13,7 @@ import gymnasium as gym
 from stable_baselines3.common.type_aliases import PolicyPredictor
 from stable_baselines3.common.vec_env import VecEnv
 from torch.utils.tensorboard import SummaryWriter
+import mlflow
 
 from binary_state_representation.binary2binaryautoencoder import Binary2BinaryEncoder
 from customPPO import MLPEncoderExtractor, TransformerEncoderExtractor
@@ -162,6 +163,75 @@ class EvalSaveCallback(EventCallback):
         if mean_reward > self.best_mean_reward:
             self.best_mean_reward = mean_reward
             self.model.save(best_path)
+            if self.verbose >= 1:
+                print(f"New best model with mean reward {mean_reward:.2f} saved to {best_path}")
+
+
+class EvalSaveCallback_mlf(EventCallback):
+    def __init__(
+            self,
+            eval_envs,
+            eval_env_names,
+            model_save_dir,
+            model_save_name,
+            eval_freq,
+            n_eval_episodes,
+            deterministic=True,
+            verbose=1,
+            start_timestep=0,
+    ):
+        super().__init__(verbose=verbose)
+        self.eval_envs = eval_envs
+        self.eval_env_names = eval_env_names
+        self.eval_freq = eval_freq
+        self.n_eval_episodes = n_eval_episodes
+        self.deterministic = deterministic
+        self.best_mean_reward = -np.inf
+        self.model_save_dir = model_save_dir
+        self.model_save_name = model_save_name
+        self.start_timestep = start_timestep
+        self.evaluations = []
+
+        # Check if there is an active MLflow run; if not, raise an error
+        if mlflow.active_run() is None:
+            raise ValueError("No active MLflow run found. Please start an MLflow run before initializing the callback.")
+
+    def _on_step(self) -> bool:
+        if self.n_calls % self.eval_freq == 0:
+            self.eval()
+        return True
+
+    def _on_training_end(self) -> None:
+        self.eval()
+
+    def eval(self):
+        print("Evaluating model...")
+        mean_reward = eval_envs(
+            envs=self.eval_envs,
+            env_names=self.eval_env_names,
+            model=self.model,
+            num_eval_episodes=self.n_eval_episodes,
+            deterministic=self.deterministic,
+            num_timesteps=self.num_timesteps + self.start_timestep,
+            verbose=self.verbose,
+        )
+
+        # Log evaluation results with MLflow
+        mlflow.log_metric("Mean Reward", mean_reward, step=self.num_timesteps + self.start_timestep)
+
+        # Save the latest model using MLflow
+        latest_path = os.path.join(self.model_save_dir, f"{self.model_save_name}_latest")
+        mlflow.pytorch.log_model(self.model, artifact_path=latest_path)
+
+        if self.verbose >= 1:
+            print(f"Saved latest model to {latest_path}")
+
+        # Save the best model if the mean reward is the highest
+        if mean_reward > self.best_mean_reward:
+            self.best_mean_reward = mean_reward
+            best_path = os.path.join(self.model_save_dir, f"{self.model_save_name}_best")
+            mlflow.pytorch.log_model(self.model, artifact_path=best_path)
+
             if self.verbose >= 1:
                 print(f"New best model with mean reward {mean_reward:.2f} saved to {best_path}")
 

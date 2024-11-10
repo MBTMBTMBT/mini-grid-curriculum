@@ -149,7 +149,7 @@ class EvalSaveCallback(EventCallback):
         self.evaluations: List[float] = []
         self.start_timestep = start_timestep
 
-        self.rewards_list: List[Tuple[str, List[float]]] = []
+        self.rewards_dict: Dict[str, List[Tuple[int, List[float]]]] = {}
 
         self.first_eval = True
 
@@ -175,7 +175,9 @@ class EvalSaveCallback(EventCallback):
                 deterministic=self.deterministic,
             )
 
-            self.rewards_list.append((env_name, rewards))
+            if env_name not in self.rewards_dict:
+                self.rewards_dict[env_name] = []
+            self.rewards_dict[env_name].append((self.num_timesteps + self.start_timestep, rewards))
 
             mean_reward = np.mean(rewards)
             std_reward = np.std(rewards)

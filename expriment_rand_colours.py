@@ -53,8 +53,7 @@ def train(
     os.makedirs(model_save_dir, exist_ok=True)
     log_dir = os.path.join(trainer_config.session_dir, "logs")
     os.makedirs(log_dir, exist_ok=True)
-    mlflow.set_tracking_uri(f'file://{os.path.abspath(log_dir)}')
-    mlflow.set_experiment(trainer_config.session_dir)
+    log_writer = SummaryWriter(log_dir)
 
     max_minimum_display_size = 0
 
@@ -91,6 +90,12 @@ def train(
             ))
         )
         eval_env_name_list.append(each_task_config.name)
+
+
+    for i in range(trainer_config.num_models):
+        print(f"Training model [{i + 1} / {trainer_config.num_models}]:")
+        steps = trainer_config.train_config.train_total_steps // trainer_config.num_parallel
+
 
 if __name__ == '__main__':
     train_configs = []

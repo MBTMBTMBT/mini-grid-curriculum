@@ -101,7 +101,7 @@ def train(
         steps = trainer_config.train_config.train_total_steps // trainer_config.num_parallel
         callback = EvalSaveCallback(
             eval_envs=eval_env_list,
-            eval_env_names=eval_env_name_list,
+            eval_env_names=[f"{name}_{i}" for name in eval_env_name_list],
             model_save_dir=model_save_dir,
             model_save_name=f"saved_model_{i}",
             log_writer=log_writer,

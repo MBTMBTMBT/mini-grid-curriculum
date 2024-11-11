@@ -176,14 +176,14 @@ if __name__ == '__main__':
     config.rand_gen_shape = None
     config.txt_file_path = f"./maps/small_maze.txt"
     config.custom_mission = "reach the goal"
-    config.minimum_display_size = 7
+    config.minimum_display_size = 5
     config.display_mode = "middle"
     config.random_rotate = False
     config.random_flip = False
     config.max_steps = 4096
     config.start_pos = (1, 1)
     config.start_dir = 1
-    config.train_total_steps = int(100e3)
+    config.train_total_steps = int(1000e3)
     config.difficulty_level = 0
     config.add_random_door_key=False
     train_config = config
@@ -195,7 +195,7 @@ if __name__ == '__main__':
     config.rand_gen_shape = None
     config.txt_file_path = f"./maps/small_maze.txt"
     config.custom_mission = "reach the goal"
-    config.minimum_display_size = 7
+    config.minimum_display_size = 5
     config.display_mode = "middle"
     config.random_rotate = False
     config.random_flip = False
@@ -211,11 +211,11 @@ if __name__ == '__main__':
 
     trainer_config = RandColourTrainerConfig(
         session_dir=f"./experiments/rand_colour-maze",
-        num_models = 3,
+        num_models = 5,
         num_parallel = 8,
         init_seed = 0,
         eval_freq = int(50e3),
-        num_eval_episodes = 5,
+        num_eval_episodes = 10,
         eval_deterministic = False,
         policy_kwargs=dict(
                 features_extractor_class=CNNEncoderExtractor,  # Use the custom encoder extractor

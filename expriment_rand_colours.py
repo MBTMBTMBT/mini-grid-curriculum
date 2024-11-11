@@ -120,8 +120,10 @@ def train(
             log_dir=log_dir,
         )
 
-        reinitialize_model(model, seed=trainer_config.init_seed)
-        print("Initialized model with hash:", hash_model(model))
+        reinitialize_model(model.policy.features_extractor, seed=trainer_config.init_seed)
+        print("Initialized feature extractor with hash:", hash_model(model.policy.features_extractor))
+        reinitialize_model(model.policy.mlp_extractor, seed=trainer_config.init_seed)
+        print("Initialized mlp extractor with hash:", hash_model(model.policy.mlp_extractor))
 
         model.policy.features_extractor.unfreeze()
         model.policy.unfreeze_mlp_extractor()
@@ -129,6 +131,7 @@ def train(
         model.learn(
             total_timesteps=steps,
             callback=CallbackList([callback]),
+            progress_bar=True,
         )
         model.save(os.path.join(model_save_dir, f"saved_model_{i}.zip"))
         print("Finished training model.")
@@ -173,50 +176,48 @@ if __name__ == '__main__':
     config.random_flip = False
     config.max_steps = 1024
     config.start_pos = (1, 1)
-    config.train_total_steps = 1e4
+    config.start_dir = 1
+    config.train_total_steps = int(1e7)
     config.difficulty_level = 0
     config.add_random_door_key=False
     train_config = config
 
     eval_configs = []
     eval_wrappers = []
-    for i in range(1, 7):
-        config = TaskConfig()
-        config.name = f"small_maze"
-        config.rand_gen_shape = None
-        config.txt_file_path = f"./maps/small_maze.txt"
-        config.custom_mission = "reach the goal"
-        config.minimum_display_size = 7
-        config.display_mode = "middle"
-        config.random_rotate = False
-        config.random_flip = False
-        config.max_steps = 1024
-        config.start_pos = (1, 1)
-        config.train_total_steps = 1e4
-        config.difficulty_level = 0
-        config.add_random_door_key = False
-        train_config = config
-        eval_configs.append(config)
-        eval_wrappers.append(RandomChannelSwapWrapper)
+    config = TaskConfig()
+    config.name = f"small_maze"
+    config.rand_gen_shape = None
+    config.txt_file_path = f"./maps/small_maze.txt"
+    config.custom_mission = "reach the goal"
+    config.minimum_display_size = 7
+    config.display_mode = "middle"
+    config.random_rotate = False
+    config.random_flip = False
+    config.max_steps = 64
+    config.start_pos = (1, 1)
+    config.start_dir = 1
+    eval_configs.append(config)
+    eval_wrappers.append(FullyObsImageWrapper)
+    config.name = f"small_maze-random_colour"
+    eval_configs.append(config)
+    eval_wrappers.append(RandomChannelSwapWrapper)
 
     trainer_config = RandColourTrainerConfig(
-        session_dir=f"./experiments/mazes-bin-32/run{i}",
-        num_models = 10,
-        num_parallel = 8,
+        session_dir=f"./experiments/rand_colour-maze",
+        num_models = 3,
+        num_parallel = 4,
         init_seed = 0,
-        eval_freq = int(1e3),
-        num_eval_episodes = 20,
+        eval_freq = int(2e5),
+        num_eval_episodes = 5,
         eval_deterministic = False,
         policy_kwargs=dict(
                 features_extractor_class=CNNEncoderExtractor,  # Use the custom encoder extractor
                 features_extractor_kwargs=dict(
-                    net_arch=[32],  # Custom layer sizes
+                    net_arch=[16],  # Custom layer sizes
                     cnn_net_arch=[
                         (64, 3, 2, 1),
                         (128, 3, 2, 1),
                         (256, 3, 2, 1),
-                        (512, 3, 2, 1),
-                        (1024, 3, 2, 1),
                     ],
                     activation_fn=nn.LeakyReLU,  # Activation function
                     encoder_only=True,

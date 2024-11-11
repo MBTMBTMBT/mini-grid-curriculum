@@ -30,11 +30,14 @@ class RandColourTrainerConfig:
             num_eval_episodes: int = 20,
             eval_deterministic: bool = False,
             policy_kwargs: Optional[dict] = None,
-            output_wrapper = FullyObsImageWrapper,
+            train_config = TaskConfig(),
+            eval_configs: List[TaskConfig] = [],
+            train_output_wrapper = FullyObsImageWrapper,
+            eval_output_wrappers: List = [],
     ):
         self.session_dir = session_dir
-        self.train_config = TaskConfig()  # Assuming TaskConfig is defined elsewhere
-        self.eval_configs: List[TaskConfig] = []
+        self.train_config = train_config  # Assuming TaskConfig is defined elsewhere
+        self.eval_configs = eval_configs
         self.num_models = num_models
         self.num_parallel = num_parallel
         self.init_seed = init_seed
@@ -42,7 +45,8 @@ class RandColourTrainerConfig:
         self.num_eval_episodes = num_eval_episodes
         self.eval_deterministic = eval_deterministic
         self.policy_kwargs = policy_kwargs
-        self.output_wrapper = output_wrapper
+        self.train_output_wrapper = train_output_wrapper
+        self.eval_output_wrappers = eval_output_wrappers
 
 
 def train(
@@ -70,7 +74,7 @@ def train(
         SubprocVecEnv([
             lambda: make_env(
                 each_task_config,
-                trainer_config.output_wrapper,
+                trainer_config.train_output_wrapper,
                 max_minimum_display_size
             ) for each_task_config in train_configs
         ])
@@ -78,88 +82,132 @@ def train(
 
     eval_env_list = []
     eval_env_name_list = []
-    for each_task_config in trainer_config.eval_configs:
+    for each_task_config, eval_wrapper in zip(trainer_config.eval_configs, trainer_config.eval_output_wrappers):
         # Store evaluation environments and names
         eval_env_list.append(VecMonitor(
             DummyVecEnv([
                 lambda: make_env(
                     each_task_config,
-                    trainer_config.output_wrapper,
+                    eval_wrapper,
                     max_minimum_display_size
                 )]
             ))
         )
         eval_env_name_list.append(each_task_config.name)
 
-
+    callbacks = []
     for i in range(trainer_config.num_models):
         print(f"Training model [{i + 1} / {trainer_config.num_models}]:")
         steps = trainer_config.train_config.train_total_steps // trainer_config.num_parallel
+        callback = EvalSaveCallback(
+            eval_envs=eval_env_list,
+            eval_env_names=eval_env_name_list,
+            model_save_dir=model_save_dir,
+            model_save_name=f"saved_model_{i}",
+            log_writer=log_writer,
+            eval_freq=trainer_config.eval_freq // trainer_config.num_parallel,
+            n_eval_episodes=trainer_config.num_eval_episodes,
+            deterministic=trainer_config.eval_deterministic,
+            verbose=1,
+        )
+        callbacks.append(callback)
+
+        model = CustomPPO(
+            CustomActorCriticPolicy,
+            env=vec_train_env,
+            policy_kwargs=trainer_config.policy_kwargs,
+            verbose=1,
+            log_dir=log_dir,
+        )
+
+        reinitialize_model(model, seed=trainer_config.init_seed)
+        print("Initialized model with hash:", hash_model(model))
+
+        model.policy.features_extractor.unfreeze()
+        model.policy.unfreeze_mlp_extractor()
+
+        model.learn(
+            total_timesteps=steps,
+            callback=CallbackList([callback]),
+        )
+        model.save(os.path.join(model_save_dir, f"saved_model_{i}.zip"))
+        print("Finished training model.")
+
+    # Dictionary to collect all rewards by step across all callbacks
+    step_rewards = {}
+
+    # Iterate over each callback instance
+    for callback in callbacks:
+        for env_name, steps_rewards in callback.rewards_dict.items():
+            for step, rewards in steps_rewards:
+                if step not in step_rewards:
+                    step_rewards[step] = []
+                step_rewards[step].extend(
+                    rewards)  # Collect all rewards for the same step across all environments and callbacks
+
+    # Calculate and log mean and std for each step across all callbacks
+    for step, rewards in sorted(step_rewards.items()):
+        mean_reward = np.mean(rewards)
+        std_dev_reward = np.std(rewards)
+
+        # Log to TensorBoard with the current step
+        log_writer.add_scalar('Overall/Mean_Reward', mean_reward, step)
+        log_writer.add_scalar('Overall/Std_Dev_Reward', std_dev_reward, step)
+
+        # Print the computed results
+        print(f"Step: {step}, Mean Reward: {mean_reward:.2f}, Std Dev: {std_dev_reward:.2f}")
+
+    # Close TensorBoard writer
+    log_writer.close()
 
 
 if __name__ == '__main__':
-    train_configs = []
+    config = TaskConfig()
+    config.name = f"small_maze"
+    config.rand_gen_shape = None
+    config.txt_file_path = f"./maps/small_maze.txt"
+    config.custom_mission = "reach the goal"
+    config.minimum_display_size = 7
+    config.display_mode = "middle"
+    config.random_rotate = False
+    config.random_flip = False
+    config.max_steps = 1024
+    config.start_pos = (1, 1)
+    config.train_total_steps = 1e4
+    config.difficulty_level = 0
+    config.add_random_door_key=False
+    train_config = config
+
     eval_configs = []
-    # num_parallel: int = 8
-
-    ##################################################################
-    for i in range(1, 2):
-        config = TaskConfig()
-        config.name = f"7-{i}"
-        config.rand_gen_shape = None
-        config.txt_file_path = f"./maps/7-{i}.txt"
-        config.custom_mission = "reach the goal"
-        config.minimum_display_size = 7
-        config.display_mode = "random"
-        config.random_rotate = True
-        config.random_flip = True
-        config.max_steps = 1024
-        config.start_pos = (5, 5)
-        config.train_total_steps = 2.5e7
-        config.difficulty_level = 0
-        config.add_random_door_key=False
-        train_configs.append(config)
-    # for _ in range(num_parallel):
-    #     train_configs.append(config)
-
+    eval_wrappers = []
     for i in range(1, 7):
         config = TaskConfig()
-        config.name = f"7-{i}"
+        config.name = f"small_maze"
         config.rand_gen_shape = None
-        config.txt_file_path = f"./maps/7-{i}.txt"
+        config.txt_file_path = f"./maps/small_maze.txt"
         config.custom_mission = "reach the goal"
         config.minimum_display_size = 7
         config.display_mode = "middle"
-        config.random_rotate = True
-        config.random_flip = True
-        config.max_steps = 50
-        config.start_pos = (5, 5)
-        config.start_dir = 1
+        config.random_rotate = False
+        config.random_flip = False
+        config.max_steps = 1024
+        config.start_pos = (1, 1)
+        config.train_total_steps = 1e4
+        config.difficulty_level = 0
+        config.add_random_door_key = False
+        train_config = config
         eval_configs.append(config)
+        eval_wrappers.append(RandomChannelSwapWrapper)
 
-    ##################################################################
-
-    # encoder = None  # test non encoding case
-    for i in range(3):
-        runner = Trainer(
-            train_configs,
-            eval_configs,
-            policy_kwargs=dict(
-                # features_extractor_class=CNNVectorQuantizerEncoderExtractor,  # Use the custom encoder extractor
-                # features_extractor_kwargs=dict(
-                #     net_arch=[],  # Custom layer sizes
-                #     cnn_net_arch=[
-                #         (64, 3, 2, 1),
-                #         (64, 3, 2, 1),
-                #         (64, 3, 2, 1),
-                #         (64, 3, 2, 1),
-                #         (64, 3, 2, 1),
-                #     ],
-                #     embedding_dim=16,
-                #     num_embeddings=4096,
-                #     activation_fn=nn.LeakyReLU,  # Activation function
-                #     encoder_only=True,
-                # ),
+    trainer_config = RandColourTrainerConfig(
+        session_dir=f"./experiments/mazes-bin-32/run{i}",
+        num_models = 10,
+        num_parallel = 8,
+        init_seed = 0,
+        eval_freq = int(1e3),
+        num_eval_episodes = 20,
+        eval_deterministic = False,
+        policy_kwargs=dict(
                 features_extractor_class=CNNEncoderExtractor,  # Use the custom encoder extractor
                 features_extractor_kwargs=dict(
                     net_arch=[32],  # Custom layer sizes
@@ -176,18 +224,10 @@ if __name__ == '__main__':
                 net_arch=dict(pi=[32, 32], vf=[32, 32]),  # Policy and value network architecture
                 activation_fn=nn.LeakyReLU,
             ),
-            output_wrapper=FullyObsImageWrapper,
-        )
-        runner.train(
-            session_dir=f"./experiments/mazes-bin-32/run{i}",
-            eval_freq=int(50e4),
-            compute_info_freq=int(50e4),
-            num_eval_episodes=50,
-            eval_deterministic=False,
-            start_time_step=0,
-            iter_gamma=0.999,
-            iter_threshold=5e-5,
-            max_iter=int(1e5),
-            num_parallel=8,
-        )
+        train_config = train_config,
+        eval_configs = eval_configs,
+        train_output_wrapper=FullyObsImageWrapper,
+        eval_output_wrappers=eval_wrappers,
+    )
 
+    train(trainer_config)

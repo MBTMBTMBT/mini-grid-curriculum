@@ -177,7 +177,7 @@ if __name__ == '__main__':
     config.max_steps = 4096
     config.start_pos = (1, 1)
     config.start_dir = 1
-    config.train_total_steps = int(0.5e7)
+    config.train_total_steps = int(5000e3)
     config.difficulty_level = 0
     config.add_random_door_key=False
     train_config = config
@@ -208,7 +208,7 @@ if __name__ == '__main__':
         num_models = 3,
         num_parallel = 8,
         init_seed = 0,
-        eval_freq = int(5e4),
+        eval_freq = int(100e3),
         num_eval_episodes = 5,
         eval_deterministic = False,
         policy_kwargs=dict(

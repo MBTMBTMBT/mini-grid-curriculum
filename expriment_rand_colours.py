@@ -177,7 +177,7 @@ if __name__ == '__main__':
     config.max_steps = 4096
     config.start_pos = (1, 1)
     config.start_dir = 1
-    config.train_total_steps = int(500e3)
+    config.train_total_steps = int(1000e3)
     config.difficulty_level = 0
     config.add_random_door_key=False
     train_config = config

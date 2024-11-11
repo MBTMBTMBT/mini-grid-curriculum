@@ -136,29 +136,35 @@ def train(
         model.save(os.path.join(model_save_dir, f"saved_model_{i}.zip"))
         print("Finished training model.")
 
-    # Dictionary to collect all rewards by step across all callbacks
-    step_rewards = {}
+    # Dictionary to collect rewards by base environment name and step
+    env_step_rewards = {}
 
     # Iterate over each callback instance
     for callback in callbacks:
-        for env_name, steps_rewards in callback.rewards_dict.items():
+        for full_env_name, steps_rewards in callback.rewards_dict.items():
+            # Extract the base environment name by removing the index suffix
+            base_env_name = "_".join(full_env_name.split("_")[:-1])  # Assumes the suffix is always of the form _i
+
+            if base_env_name not in env_step_rewards:
+                env_step_rewards[base_env_name] = {}
             for step, rewards in steps_rewards:
-                if step not in step_rewards:
-                    step_rewards[step] = []
-                step_rewards[step].extend(
-                    rewards)  # Collect all rewards for the same step across all environments and callbacks
+                if step not in env_step_rewards[base_env_name]:
+                    env_step_rewards[base_env_name][step] = []
+                env_step_rewards[base_env_name][step].extend(rewards)
 
-    # Calculate and log mean and std for each step across all callbacks
-    for step, rewards in sorted(step_rewards.items()):
-        mean_reward = np.mean(rewards)
-        std_dev_reward = np.std(rewards)
+    # Calculate and log mean and std for each base environment and step
+    for base_env_name, steps_rewards in env_step_rewards.items():
+        for step, rewards in sorted(steps_rewards.items()):
+            mean_reward = np.mean(rewards)
+            std_dev_reward = np.std(rewards)
 
-        # Log to TensorBoard with the current step
-        log_writer.add_scalar('Overall/Mean_Reward', mean_reward, step)
-        log_writer.add_scalar('Overall/Std_Dev_Reward', std_dev_reward, step)
+            # Log to TensorBoard with the current step for each base environment
+            log_writer.add_scalar(f'{base_env_name}/Mean_Reward', mean_reward, step)
+            log_writer.add_scalar(f'{base_env_name}/Std_Dev_Reward', std_dev_reward, step)
 
-        # Print the computed results
-        print(f"Step: {step}, Mean Reward: {mean_reward:.2f}, Std Dev: {std_dev_reward:.2f}")
+            # Print the computed results
+            print(
+                f"Base Environment: {base_env_name}, Step: {step}, Mean Reward: {mean_reward:.2f}, Std Dev: {std_dev_reward:.2f}")
 
     # Close TensorBoard writer
     log_writer.close()

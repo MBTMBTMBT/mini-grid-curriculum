@@ -208,7 +208,7 @@ if __name__ == '__main__':
         num_models = 3,
         num_parallel = 8,
         init_seed = 0,
-        eval_freq = int(2.5e5),
+        eval_freq = int(5e4),
         num_eval_episodes = 5,
         eval_deterministic = False,
         policy_kwargs=dict(

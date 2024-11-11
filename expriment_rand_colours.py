@@ -174,10 +174,10 @@ if __name__ == '__main__':
     config.display_mode = "middle"
     config.random_rotate = False
     config.random_flip = False
-    config.max_steps = 1024
+    config.max_steps = 4096
     config.start_pos = (1, 1)
     config.start_dir = 1
-    config.train_total_steps = int(1e7)
+    config.train_total_steps = int(0.5e7)
     config.difficulty_level = 0
     config.add_random_door_key=False
     train_config = config
@@ -193,7 +193,7 @@ if __name__ == '__main__':
     config.display_mode = "middle"
     config.random_rotate = False
     config.random_flip = False
-    config.max_steps = 64
+    config.max_steps = 256
     config.start_pos = (1, 1)
     config.start_dir = 1
     eval_configs.append(config)
@@ -205,9 +205,9 @@ if __name__ == '__main__':
     trainer_config = RandColourTrainerConfig(
         session_dir=f"./experiments/rand_colour-maze",
         num_models = 3,
-        num_parallel = 4,
+        num_parallel = 8,
         init_seed = 0,
-        eval_freq = int(2e5),
+        eval_freq = int(2.5e5),
         num_eval_episodes = 5,
         eval_deterministic = False,
         policy_kwargs=dict(

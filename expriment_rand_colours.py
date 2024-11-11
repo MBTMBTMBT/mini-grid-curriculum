@@ -198,6 +198,8 @@ if __name__ == '__main__':
     config.start_dir = 1
     eval_configs.append(config)
     eval_wrappers.append(FullyObsImageWrapper)
+    config = TaskConfig()
+    config.clone(config)
     config.name = f"small_maze-random_colour"
     eval_configs.append(config)
     eval_wrappers.append(RandomChannelSwapWrapper)

@@ -174,7 +174,7 @@ if __name__ == '__main__':
     config = TaskConfig()
     config.name = f"small_maze"
     config.rand_gen_shape = None
-    config.txt_file_path = f"./maps/small_maze.txt"
+    config.txt_file_path = f"./maps/little_square.txt"
     config.custom_mission = "reach the goal"
     config.minimum_display_size = 7
     config.display_mode = "middle"
@@ -193,7 +193,7 @@ if __name__ == '__main__':
     config = TaskConfig()
     config.name = f"small_maze"
     config.rand_gen_shape = None
-    config.txt_file_path = f"./maps/small_maze.txt"
+    config.txt_file_path = f"./maps/little_square.txt"
     config.custom_mission = "reach the goal"
     config.minimum_display_size = 7
     config.display_mode = "middle"

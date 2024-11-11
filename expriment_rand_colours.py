@@ -98,7 +98,7 @@ def train(
     callbacks = []
     for i in range(trainer_config.num_models):
         print(f"Training model [{i + 1} / {trainer_config.num_models}]:")
-        steps = trainer_config.train_config.train_total_steps // trainer_config.num_parallel
+        steps = trainer_config.train_config.train_total_steps
         callback = EvalSaveCallback(
             eval_envs=eval_env_list,
             eval_env_names=[f"{name}_{i}" for name in eval_env_name_list],
@@ -177,7 +177,7 @@ if __name__ == '__main__':
     config.max_steps = 4096
     config.start_pos = (1, 1)
     config.start_dir = 1
-    config.train_total_steps = int(5000e3)
+    config.train_total_steps = int(500e3)
     config.difficulty_level = 0
     config.add_random_door_key=False
     train_config = config
@@ -208,7 +208,7 @@ if __name__ == '__main__':
         num_models = 3,
         num_parallel = 8,
         init_seed = 0,
-        eval_freq = int(100e3),
+        eval_freq = int(50e3),
         num_eval_episodes = 5,
         eval_deterministic = False,
         policy_kwargs=dict(

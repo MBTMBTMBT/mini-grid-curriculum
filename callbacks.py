@@ -164,7 +164,7 @@ class EvalSaveCallback(EventCallback):
         self.eval()
 
     def eval(self):
-        print("Evaluating model...")
+        print(f"Evaluating model at step[{self.num_timesteps + self.start_timestep}]...")
 
         rewards_ = []
         for env, env_name in zip(self.eval_envs, self.eval_env_names):

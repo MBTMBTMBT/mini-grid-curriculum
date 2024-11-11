@@ -174,7 +174,7 @@ if __name__ == '__main__':
     config = TaskConfig()
     config.name = f"small_maze"
     config.rand_gen_shape = None
-    config.txt_file_path = f"./maps/little_square.txt"
+    config.txt_file_path = f"./maps/small_maze.txt"
     config.custom_mission = "reach the goal"
     config.minimum_display_size = 7
     config.display_mode = "middle"
@@ -183,7 +183,7 @@ if __name__ == '__main__':
     config.max_steps = 4096
     config.start_pos = (1, 1)
     config.start_dir = 1
-    config.train_total_steps = int(1000e3)
+    config.train_total_steps = int(100e3)
     config.difficulty_level = 0
     config.add_random_door_key=False
     train_config = config
@@ -193,7 +193,7 @@ if __name__ == '__main__':
     config = TaskConfig()
     config.name = f"small_maze"
     config.rand_gen_shape = None
-    config.txt_file_path = f"./maps/little_square.txt"
+    config.txt_file_path = f"./maps/small_maze.txt"
     config.custom_mission = "reach the goal"
     config.minimum_display_size = 7
     config.display_mode = "middle"

@@ -181,9 +181,9 @@ if __name__ == '__main__':
     config.random_rotate = False
     config.random_flip = False
     config.max_steps = 4096
-    config.start_pos = (1, 1)
-    config.start_dir = 1
-    config.train_total_steps = int(1000e3)
+    config.start_pos = None
+    config.start_dir = None
+    config.train_total_steps = int(500e3)
     config.difficulty_level = 0
     config.add_random_door_key=False
     train_config = config
@@ -214,7 +214,7 @@ if __name__ == '__main__':
         num_models=5,
         num_parallel=8,
         init_seed=0,
-        eval_freq=int(50e3),
+        eval_freq=int(25e3),
         num_eval_episodes=10,
         eval_deterministic=False,
         policy_kwargs=dict(

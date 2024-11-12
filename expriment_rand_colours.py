@@ -210,6 +210,37 @@ if __name__ == '__main__':
     eval_wrappers.append(RandomChannelSwapWrapper)
 
     trainer_config = RandColourTrainerConfig(
+        session_dir=f"./experiments/normal_colour-maze",
+        num_models=5,
+        num_parallel=8,
+        init_seed=0,
+        eval_freq=int(50e3),
+        num_eval_episodes=10,
+        eval_deterministic=False,
+        policy_kwargs=dict(
+            features_extractor_class=CNNEncoderExtractor,  # Use the custom encoder extractor
+            features_extractor_kwargs=dict(
+                net_arch=[16],  # Custom layer sizes
+                cnn_net_arch=[
+                    (64, 3, 2, 1),
+                    (128, 3, 2, 1),
+                    (256, 3, 2, 1),
+                ],
+                activation_fn=nn.LeakyReLU,  # Activation function
+                encoder_only=True,
+            ),
+            net_arch=dict(pi=[32, 32], vf=[32, 32]),  # Policy and value network architecture
+            activation_fn=nn.LeakyReLU,
+        ),
+        train_config=train_config,
+        eval_configs=eval_configs,
+        train_output_wrapper=FullyObsImageWrapper,
+        eval_output_wrappers=eval_wrappers,
+    )
+
+    train(trainer_config)
+
+    trainer_config = RandColourTrainerConfig(
         session_dir=f"./experiments/rand_colour-maze",
         num_models = 5,
         num_parallel = 8,

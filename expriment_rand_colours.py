@@ -211,7 +211,7 @@ if __name__ == '__main__':
 
     trainer_config = RandColourTrainerConfig(
         session_dir=f"./experiments/normal_colour-maze",
-        num_models=5,
+        num_models=3,
         num_parallel=8,
         init_seed=0,
         eval_freq=int(25e3),
@@ -242,12 +242,12 @@ if __name__ == '__main__':
 
     trainer_config = RandColourTrainerConfig(
         session_dir=f"./experiments/rand_colour-maze",
-        num_models = 5,
-        num_parallel = 8,
-        init_seed = 0,
-        eval_freq = int(50e3),
-        num_eval_episodes = 10,
-        eval_deterministic = False,
+        num_models=3,
+        num_parallel=8,
+        init_seed=0,
+        eval_freq=int(50e3),
+        num_eval_episodes=10,
+        eval_deterministic=False,
         policy_kwargs=dict(
                 features_extractor_class=CNNEncoderExtractor,  # Use the custom encoder extractor
                 features_extractor_kwargs=dict(
@@ -263,8 +263,115 @@ if __name__ == '__main__':
                 net_arch=dict(pi=[32, 32], vf=[32, 32]),  # Policy and value network architecture
                 activation_fn=nn.LeakyReLU,
             ),
-        train_config = train_config,
-        eval_configs = eval_configs,
+        train_config=train_config,
+        eval_configs=eval_configs,
+        train_output_wrapper=RandomChannelSwapWrapper,
+        eval_output_wrappers=eval_wrappers,
+    )
+
+    train(trainer_config)
+
+    config = TaskConfig()
+    config.name = f"2d2k6c"
+    config.rand_gen_shape = None
+    config.txt_file_path = f"./maps/2d2k.txt"
+    config.custom_mission = "reach the goal"
+    config.minimum_display_size = 5
+    config.display_mode = "middle"
+    config.random_rotate = False
+    config.random_flip = False
+    config.max_steps = 4096
+    config.start_pos = None
+    config.start_dir = None
+    config.train_total_steps = int(500e3)
+    config.difficulty_level = 0
+    config.add_random_door_key = False
+    config.rand_colours = ['R', 'G', 'B', 'P', 'Y', 'E']
+    train_config = config
+
+    eval_configs = []
+    eval_wrappers = []
+    config = TaskConfig()
+    config.name = f"2d2k6c"
+    config.rand_gen_shape = None
+    config.txt_file_path = f"./maps/2d2k.txt"
+    config.custom_mission = "reach the goal"
+    config.minimum_display_size = 5
+    config.display_mode = "middle"
+    config.random_rotate = False
+    config.random_flip = False
+    config.max_steps = 256
+    config.start_pos = (1, 1)
+    config.start_dir = 1
+    config.rand_colours = ['R', 'G', 'B', 'P', 'Y', 'E']
+    eval_configs.append(config)
+    eval_wrappers.append(FullyObsImageWrapper)
+    config = config.clone()
+    config.name = f"2d2k3c"
+    config.rand_colours = ['R', 'G', 'B',]
+    eval_configs.append(config)
+    eval_wrappers.append(FullyObsImageWrapper)
+
+    trainer_config = RandColourTrainerConfig(
+        session_dir=f"./experiments/2d2k6c",
+        num_models=3,
+        num_parallel=8,
+        init_seed=0,
+        eval_freq=int(25e3),
+        num_eval_episodes=10,
+        eval_deterministic=False,
+        policy_kwargs=dict(
+            features_extractor_class=CNNEncoderExtractor,  # Use the custom encoder extractor
+            features_extractor_kwargs=dict(
+                net_arch=[16],  # Custom layer sizes
+                cnn_net_arch=[
+                    (64, 3, 2, 1),
+                    (128, 3, 2, 1),
+                    (256, 3, 2, 1),
+                ],
+                activation_fn=nn.LeakyReLU,  # Activation function
+                encoder_only=True,
+            ),
+            net_arch=dict(pi=[32, 32], vf=[32, 32]),  # Policy and value network architecture
+            activation_fn=nn.LeakyReLU,
+        ),
+        train_config=train_config,
+        eval_configs=eval_configs,
+        train_output_wrapper=FullyObsImageWrapper,
+        eval_output_wrappers=eval_wrappers,
+    )
+
+    train(trainer_config)
+
+    train_config = train_config.clone()
+    config.name = f"2d2k3c"
+    train_config.rand_colours = ['R', 'G', 'B',]
+
+    trainer_config = RandColourTrainerConfig(
+        session_dir=f"./experiments/2d2k3c",
+        num_models=3,
+        num_parallel=8,
+        init_seed=0,
+        eval_freq=int(50e3),
+        num_eval_episodes=10,
+        eval_deterministic=False,
+        policy_kwargs=dict(
+            features_extractor_class=CNNEncoderExtractor,  # Use the custom encoder extractor
+            features_extractor_kwargs=dict(
+                net_arch=[16],  # Custom layer sizes
+                cnn_net_arch=[
+                    (64, 3, 2, 1),
+                    (128, 3, 2, 1),
+                    (256, 3, 2, 1),
+                ],
+                activation_fn=nn.LeakyReLU,  # Activation function
+                encoder_only=True,
+            ),
+            net_arch=dict(pi=[32, 32], vf=[32, 32]),  # Policy and value network architecture
+            activation_fn=nn.LeakyReLU,
+        ),
+        train_config=train_config,
+        eval_configs=eval_configs,
         train_output_wrapper=FullyObsImageWrapper,
         eval_output_wrappers=eval_wrappers,
     )

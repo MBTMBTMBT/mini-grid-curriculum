@@ -1,7 +1,4 @@
-from typing import Optional, Tuple, Type, Any
-
-from gymnasium import Wrapper
-
+from typing import Optional, Tuple
 from customize_minigrid.custom_env import CustomEnv
 
 
@@ -26,6 +23,8 @@ class TaskConfig:
         self.train_total_steps: int = 0
         self.difficulty_level: int = 0
 
+        self.rand_colours = ['R', 'G', 'B', 'P', 'Y', 'E']
+
     def clone(self,) -> "TaskConfig":
         new = TaskConfig()
         new.name = self.name
@@ -41,6 +40,7 @@ class TaskConfig:
         new.start_dir = self.start_dir
         new.train_total_steps = self.train_total_steps
         new.difficulty_level = self.difficulty_level
+        new.rand_colours = self.rand_colours
         return new
 
 
@@ -68,5 +68,6 @@ def make_env(env_config, wrapper, max_minimum_display_size: int):
             agent_start_pos=env_config.start_pos,
             agent_start_dir=env_config.start_dir,
             add_random_door_key=env_config.add_random_door_key,
+            rand_colours=env_config.rand_colours,
         )
     )

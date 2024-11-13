@@ -276,7 +276,7 @@ if __name__ == '__main__':
     config.rand_gen_shape = None
     config.txt_file_path = f"./maps/2d2k.txt"
     config.custom_mission = "reach the goal"
-    config.minimum_display_size = 5
+    config.minimum_display_size = 6
     config.display_mode = "middle"
     config.random_rotate = False
     config.random_flip = False
@@ -296,12 +296,12 @@ if __name__ == '__main__':
     config.rand_gen_shape = None
     config.txt_file_path = f"./maps/2d2k.txt"
     config.custom_mission = "reach the goal"
-    config.minimum_display_size = 5
+    config.minimum_display_size = 6
     config.display_mode = "middle"
     config.random_rotate = False
     config.random_flip = False
     config.max_steps = 256
-    config.start_pos = (1, 1)
+    config.start_pos = None
     config.start_dir = 1
     config.rand_colours = ['R', 'G', 'B', 'P', 'Y', 'E']
     eval_configs.append(config)
